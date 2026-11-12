@@ -1,5 +1,5 @@
 import { icons } from './icons'
-import { useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useRef, useState, type KeyboardEvent } from 'react'
 import { GoogleAgenda, GoogleInbox } from './GoogleSections'
 import type { Section } from './types'
 
@@ -27,16 +27,17 @@ function useRows<T>(value: T[] | undefined, empty: (r: T) => boolean, blank: () 
     onChange(out)
   }
   const set = (i: number, patch: Partial<T>) => commit(rows.map((r, j) => (j === i ? { ...r, ...patch } : r)))
-  const focus = (i: number) =>
-    requestAnimationFrame(() => ref.current?.querySelectorAll<HTMLInputElement>('[data-row]')[i]?.focus())
-  const onKey = (i: number) => (e: KeyboardEvent<HTMLInputElement>) => {
+  const at = (i: number) => ref.current?.querySelectorAll<HTMLElement>('[data-row]')[i]
+  // focus straight away when the row exists, so fast typing after Enter lands in the new row
+  const focus = (i: number, wait = false) => (wait ? requestAnimationFrame(() => at(i)?.focus()) : at(i)?.focus())
+  const onKey = (i: number) => (e: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     if (e.key === 'Enter') {
       e.preventDefault()
       focus(i + 1)
     } else if (e.key === 'Backspace' && e.currentTarget.value === '' && i > 0 && i < (value?.length ?? 0)) {
       e.preventDefault()
       commit(rows.filter((_, j) => j !== i))
-      focus(i - 1)
+      focus(i - 1, true)
     }
   }
   return { rows, ref, set, onKey }
@@ -53,11 +54,11 @@ function Checklist({ value, onChange, rows: min = 3, placeholder }: P<Item[]> & 
             className="check" aria-label={r.done ? 'Mark not done' : 'Mark done'} aria-pressed={r.done}
             disabled={!r.text} onClick={() => set(i, { done: !r.done })}
           >
-            {r.done && <Icon name="Check" size={12} />}
+            <Icon name="Check" size={12} />
           </button>
-          <input
-            data-row value={r.text} placeholder={i === 0 ? placeholder : undefined}
-            onChange={(e) => set(i, { text: e.target.value })} onKeyDown={onKey(i)}
+          <Grow
+            data-row value={r.text} placeholder={i === 0 ? placeholder : undefined} aria-label="Item"
+            onChange={(e) => set(i, { text: e.target.value.replace(/\n/g, ' ') })} onKeyDown={onKey(i)}
           />
         </div>
       ))}
@@ -65,20 +66,17 @@ function Checklist({ value, onChange, rows: min = 3, placeholder }: P<Item[]> & 
   )
 }
 
-function Text({ value, onChange, placeholder, look }: P<string> & { placeholder?: string; look?: string }) {
-  const ref = useRef<HTMLTextAreaElement>(null)
-  useLayoutEffect(() => {
-    const el = ref.current
-    if (!el) return
-    el.style.height = 'auto'
-    el.style.height = `${el.scrollHeight}px`
-  }, [value])
+/** Textarea that grows with its content: a hidden mirror in the same grid cell sets the height. */
+function Grow({ value, className = '', ...rest }: { value: string } & React.TextareaHTMLAttributes<HTMLTextAreaElement>) {
   return (
-    <textarea
-      ref={ref} rows={look === 'sticky' ? 4 : 2} className={`text ${look ?? ''}`} value={value ?? ''}
-      placeholder={placeholder} onChange={(e) => onChange(e.target.value)}
-    />
+    <div className={`grow ${className}`} data-v={value || rest.placeholder || ''}>
+      <textarea rows={1} value={value} {...rest} />
+    </div>
   )
+}
+
+function Text({ value, onChange, placeholder, look }: P<string> & { placeholder?: string; look?: string }) {
+  return <Grow className={`text ${look ?? ''}`} value={value ?? ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
 }
 
 async function shrink(file: File): Promise<string> {
@@ -145,7 +143,8 @@ function MonthNav({ ym, set }: { ym: Date; set: (d: Date) => void }) {
   return (
     <div className="monthnav">
       <button className="ghost" aria-label="Previous month" onClick={() => go(-1)}><Icon name="ChevronLeft" /></button>
-      <span>{ym.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
+      <span className="long">{ym.toLocaleDateString(undefined, { month: 'long', year: 'numeric' })}</span>
+      <span className="short">{ym.toLocaleDateString(undefined, { month: 'short', year: 'numeric' })}</span>
       <button className="ghost" aria-label="Next month" onClick={() => go(1)}><Icon name="ChevronRight" /></button>
     </div>
   )
@@ -429,9 +428,15 @@ export function SectionView({ s, value, onChange }: { s: Section } & P) {
   })()
   if (body === null) return null
   const label = 'label' in s ? s.label : undefined
+  const items: Item[] = s.kind === 'checklist' && Array.isArray(value) ? value.filter((r: Item) => r.text) : []
   return (
     <section className={`sec sec-${s.kind}`}>
-      {label && <h4>{label}</h4>}
+      {label && (
+        <h4>
+          {label}
+          {items.length > 0 && <span className={items.every((r) => r.done) ? 'all' : ''}>{items.filter((r) => r.done).length}/{items.length}</span>}
+        </h4>
+      )}
       {body}
     </section>
   )

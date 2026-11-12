@@ -4,12 +4,13 @@ import { SPACE_COLORS, uid, type Card, type State } from './types'
 
 export type Action =
   | { t: 'load'; state: State }
-  | { t: 'addCard'; type: string; title?: string; data?: Record<string, any>; spaceId?: string }
+  | { t: 'addCard'; id?: string; type: string; title?: string; data?: Record<string, any>; spaceId?: string }
   | { t: 'setData'; id: string; key: string; value: any }
   | { t: 'patchCard'; id: string; patch: Partial<Card> }
   | { t: 'removeCard'; id: string }
   | { t: 'dupCard'; id: string }
-  | { t: 'moveCard'; id: string; beforeId?: string; step?: number }
+  | { t: 'moveCard'; id: string; beforeId?: string; afterId?: string; step?: number }
+  | { t: 'restoreCard'; card: Card; index: number }
   | { t: 'addSpace'; name: string }
   | { t: 'removeSpace'; id: string }
   | { t: 'addBoard'; name: string }
@@ -18,52 +19,32 @@ export type Action =
   | { t: 'setBoard'; id: string }
   | { t: 'setCols'; cols: number }
 
-const item = (text: string, done = false) => ({ text, done })
-const iso = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+export type Starter = 'life' | 'work' | 'home' | 'blank'
 
-export function seed(): State {
+/** First-run boards: real structure, no fake content. */
+export function starter(kind: Starter): State {
   const b = uid()
-  const [me, home, work, money] = [uid(), uid(), uid(), uid()]
-  const now = new Date()
-  const habit: Record<string, boolean> = {}
-  for (let i = 1; i < now.getDate(); i++) if (i % 3 !== 0) habit[iso(new Date(now.getFullYear(), now.getMonth(), i))] = true
-  const soon = (n: number) => iso(new Date(now.getFullYear(), now.getMonth(), now.getDate() + n))
-  const c = (type: string, title: string, spaceId: string | undefined, data: Record<string, any>): Card => ({
-    id: uid(), boardId: b, type, title, spaceId, data,
+  const sp = (name: string, i: number) => ({ id: uid(), name, color: SPACE_COLORS[i] })
+  const spaces =
+    kind === 'work' ? [sp('Focus', 2), sp('Team', 0), sp('Clients', 1)]
+    : kind === 'home' ? [sp('Home', 0), sp('Family', 3), sp('Money', 4)]
+    : kind === 'life' ? [sp('Me', 3), sp('Home', 0), sp('Work', 2), sp('Money', 4)]
+    : []
+  const c = (type: string, space?: number, title?: string, data: Record<string, any> = {}): Card => ({
+    id: uid(), boardId: b, type, title: title ?? typeOf(type).name, spaceId: space === undefined ? undefined : spaces[space]?.id, data,
   })
+  const hello = c('sticky', undefined, 'Welcome', { text: 'Tap + to add anything.\nHold a card to move it.' })
+  const cards =
+    kind === 'work'
+      ? [c('today', 0), c('agenda', 0), c('gmail', 0), c('project', 0), hello, c('roadmap', 1), c('meeting', 1), c('waiting', 1), c('client', 2), c('ideas'), c('note')]
+    : kind === 'home'
+      ? [c('meals', 0), c('shopping', 0), c('todo', 0, 'Around the house'), hello, c('week', 1), c('dates', 1), c('contacts', 1), c('budget', 2), c('trip', 1), c('photo')]
+    : kind === 'life'
+      ? [c('today', 0), c('agenda', 2), c('habit', 0, 'Daily habit'), hello, c('goal', 0), c('meals', 1), c('gmail', 2), c('shopping', 1), c('budget', 3), c('dates', 0), c('journal', 0), c('photo')]
+      : [hello]
   return {
-    boards: [{ id: b, name: 'My board' }],
-    boardId: b,
-    cols: 4,
-    spaces: [
-      { id: me, name: 'Me', color: SPACE_COLORS[3] },
-      { id: home, name: 'Home', color: SPACE_COLORS[0] },
-      { id: work, name: 'Work', color: SPACE_COLORS[2] },
-      { id: money, name: 'Money', color: SPACE_COLORS[4] },
-    ],
-    cards: [
-      c('today', 'Today', me, {
-        top: [item('Book the dentist', true), item('Pay the car insurance'), item('Call Mum')],
-        rest: [item('Return the parcel'), item('Water the plants')],
-      }),
-      c('agenda', 'Calendar', work, {}),
-      c('habit', 'Walk 30 minutes', me, { habit }),
-      c('sticky', 'Sticky', undefined, { text: 'What if it were easy?' }),
-      c('goal', 'Run 5 km by summer', me, {
-        n: { value: 2, target: 5, unit: 'km' },
-        why: 'More energy, and time outside.',
-        miles: [item('2 km', true), item('3 km'), item('5 km')],
-      }),
-      c('gmail', 'Gmail inbox', work, {}),
-      c('budget', 'Budget', money, {
-        rows: { budget: 3200, rows: [{ label: 'Rent', amount: 1250 }, { label: 'Groceries', amount: 620 }, { label: 'Car', amount: 310 }] },
-      }),
-      c('meals', 'Meals', home, { days: { Mon: 'Salmon and greens', Tue: 'Pasta with pesto', Wed: 'Soup and bread', Fri: 'Out with friends' } }),
-      c('dates', 'Birthdays', me, { dates: [{ label: "Anna's birthday", date: soon(12) }, { label: 'Mum and Dad, 40 years', date: soon(33) }] }),
-      c('shopping', 'Shopping', home, { items: [item('Oat milk'), item('Coffee beans'), item('Lemons', true)] }),
-      c('note', 'Note', work, { text: 'Supplier visit\nBring the old samples. Ask about lead times.' }),
-      c('photo', 'Photo', undefined, {}),
-    ],
+    boards: [{ id: b, name: kind === 'work' ? 'Work' : kind === 'home' ? 'Home' : 'My board' }],
+    boardId: b, cols: 4, spaces, cards,
   }
 }
 
@@ -73,7 +54,7 @@ export function reducer(s: State, a: Action): State {
       return a.state
     case 'addCard': {
       const card: Card = {
-        id: uid(), boardId: s.boardId, type: a.type, title: a.title ?? typeOf(a.type).name,
+        id: a.id ?? uid(), boardId: s.boardId, type: a.type, title: a.title ?? typeOf(a.type).name,
         spaceId: a.spaceId, data: a.data ?? {},
       }
       return { ...s, cards: [card, ...s.cards] }
@@ -103,11 +84,15 @@ export function reducer(s: State, a: Action): State {
         if (pos < 0 || pos > same.length) return s
         to = pos === same.length ? rest.length : same[pos]
       } else {
-        to = a.beforeId ? rest.findIndex((c) => c.id === a.beforeId) : rest.length
+        to = a.afterId
+          ? rest.findIndex((c) => c.id === a.afterId) + 1 || -1
+          : a.beforeId ? rest.findIndex((c) => c.id === a.beforeId) : rest.length
         if (to < 0) return s
       }
       return { ...s, cards: [...rest.slice(0, to), card, ...rest.slice(to)] }
     }
+    case 'restoreCard':
+      return { ...s, cards: [...s.cards.slice(0, a.index), a.card, ...s.cards.slice(a.index)] }
     case 'addSpace':
       return { ...s, spaces: [...s.spaces, { id: uid(), name: a.name, color: SPACE_COLORS[s.spaces.length % SPACE_COLORS.length] }] }
     case 'removeSpace':
@@ -168,3 +153,6 @@ export async function saveState(s: State): Promise<void> {
 
 export const Ctx = createContext<{ state: State; dispatch: (a: Action) => void; openSettings: () => void }>(null as any)
 export const useApp = () => useContext(Ctx)
+/** Stable across renders, so memoised cards do not re-render on every keystroke elsewhere. */
+export const DispatchCtx = createContext<(a: Action) => void>(() => {})
+export const useDispatch = () => useContext(DispatchCtx)

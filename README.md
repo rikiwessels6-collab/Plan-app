@@ -3,9 +3,13 @@
 One visual board for tasks, notes, photos, plans, money and people, with Gmail and Google Calendar on the same board.
 
 - 57 card types (Today, Week, Month, Habit, Budget, Trip, Meals, Goal, Photo, Sticky…) from the **+** button
-- Boards, colour-coded spaces, search, adjustable column count, drag to reorder (or "Move earlier/later" on a phone)
+- Boards, colour-coded spaces, search, adjustable column count
+- Drag cards to reorder: drag the header with a mouse, or press and hold it on a phone
+- Tap a card's icon to open it full size; delete has Undo
 - **Gmail inbox** card: unread mail from every connected account; one tap turns an email into a to-do
 - **Calendar** card: the next 7 days, plus "New event" which writes to Google Calendar. Today and Day plan cards show today's events too
+- Light, dark or system theme; keyboard shortcuts (`N` new card, `/` search)
+- Installable to the home screen and usable offline once hosted over HTTPS
 - Everything is stored on the device (IndexedDB). Settings has backup and restore
 
 ## Run
