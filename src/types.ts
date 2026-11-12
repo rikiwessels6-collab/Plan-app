@@ -17,6 +17,11 @@ export type Section =
   | { kind: 'mood'; key: string }
   | { kind: 'gmail'; key: string }
   | { kind: 'agenda'; key: string; days: number; label?: string; quiet?: boolean }
+  | { kind: 'swatch'; key: string }
+  | { kind: 'place'; key: string }
+  | { kind: 'weather'; key: string }
+  | { kind: 'timer'; key: string }
+  | { kind: 'upcoming'; key: string }
 
 export interface CardType {
   id: string
@@ -34,6 +39,8 @@ export interface Card {
   title: string
   spaceId?: string
   data: Record<string, any>
+  /** last-changed time (ms); lets two devices merge their boards card by card */
+  u?: number
 }
 
 export interface Space {
@@ -53,6 +60,9 @@ export interface State {
   spaces: Space[]
   cards: Card[]
   cols: number
+  /** when each deleted card was deleted, so a sync does not bring it back */
+  deleted?: Record<string, number>
+  updatedAt?: number
 }
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)

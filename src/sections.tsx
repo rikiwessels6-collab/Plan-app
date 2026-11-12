@@ -1,5 +1,7 @@
 import { icons } from './icons'
 import { useRef, useState, type KeyboardEvent } from 'react'
+import { addToCalendar, hasContactPicker, parseVcards, pickContacts, type Person as Contact } from './device'
+import { FocusTimer, Place, Swatch, Upcoming, Weather } from './extras'
 import { GoogleAgenda, GoogleInbox } from './GoogleSections'
 import type { Section } from './types'
 
@@ -46,6 +48,19 @@ function useRows<T>(value: T[] | undefined, empty: (r: T) => boolean, blank: () 
 interface Item { text: string; done: boolean }
 function Checklist({ value, onChange, rows: min = 3, placeholder }: P<Item[]> & { rows?: number; placeholder?: string }) {
   const { rows, ref, set, onKey } = useRows<Item>(value, (r) => !r.text, () => ({ text: '', done: false }), min, onChange)
+  // pasting several lines makes several items (and understands "- [x] done" style lists)
+  const paste = (i: number) => (e: React.ClipboardEvent) => {
+    const lines = e.clipboardData.getData('text').split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+    if (lines.length < 2) return
+    e.preventDefault()
+    const items = lines.map((l) => {
+      const m = l.match(/^(?:[-*•]\s*)?(?:\[( |x|X)\]\s*)?(?:\d+[.)]\s+)?(.*)$/)!
+      return { text: m[2] || l, done: !!m[1]?.trim() }
+    })
+    const cur = (value ?? []).slice()
+    cur.splice(rows[i].text ? i + 1 : i, rows[i].text ? 0 : 1, ...items)
+    onChange(cur.filter((r) => r.text))
+  }
   return (
     <div className="rows" ref={ref}>
       {rows.map((r, i) => (
@@ -58,7 +73,7 @@ function Checklist({ value, onChange, rows: min = 3, placeholder }: P<Item[]> & 
           </button>
           <Grow
             data-row value={r.text} placeholder={i === 0 ? placeholder : undefined} aria-label="Item"
-            onChange={(e) => set(i, { text: e.target.value.replace(/\n/g, ' ') })} onKeyDown={onKey(i)}
+            onChange={(e) => set(i, { text: e.target.value.replace(/\n/g, ' ') })} onKeyDown={onKey(i)} onPaste={paste(i)}
           />
         </div>
       ))}
@@ -79,7 +94,7 @@ function Text({ value, onChange, placeholder, look }: P<string> & { placeholder?
   return <Grow className={`text ${look ?? ''}`} value={value ?? ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
 }
 
-async function shrink(file: File): Promise<string> {
+export async function shrink(file: File): Promise<string> {
   const img = await createImageBitmap(file)
   const k = Math.min(1, 1400 / Math.max(img.width, img.height))
   const c = document.createElement('canvas')
@@ -248,6 +263,11 @@ function Dates({ value, onChange }: P<DateRow[]>) {
             <input data-row value={r.label} placeholder={i === 0 ? 'What' : undefined} onChange={(e) => set(i, { label: e.target.value })} onKeyDown={onKey(i)} />
             <input type="date" aria-label="Date" value={r.date} onChange={(e) => set(i, { date: e.target.value })} />
             {n !== null && <em className={n < 0 ? 'past' : ''}>{n === 0 ? 'today' : n > 0 ? `in ${n}d` : `${-n}d ago`}</em>}
+            {r.date && (
+              <button className="ghost mini" aria-label="Add to calendar" title="Add to calendar" onClick={() => addToCalendar(r.label, r.date)}>
+                <Icon name="CalendarPlus" size={14} />
+              </button>
+            )}
           </div>
         )
       })}
@@ -255,13 +275,18 @@ function Dates({ value, onChange }: P<DateRow[]>) {
   )
 }
 
-function Countdown({ value, onChange }: P<string>) {
+function Countdown({ value, onChange, title }: P<string> & { title: string }) {
   const n = value ? daysUntil(value) : null
   return (
     <div className="count">
       <div className="bigno">{n === null ? '–' : Math.abs(n)}</div>
       <div className="hint">{n === null ? 'Pick a date' : n === 0 ? 'It is today' : n > 0 ? `day${n > 1 ? 's' : ''} to go` : `day${n < -1 ? 's' : ''} ago`}</div>
       <input type="date" aria-label="Date" value={value ?? ''} onChange={(e) => onChange(e.target.value)} />
+      {value && (
+        <button className="ghost mini" aria-label="Add to calendar" title="Add to calendar" onClick={() => addToCalendar(title, value)}>
+          <Icon name="CalendarPlus" size={14} />
+        </button>
+      )}
     </div>
   )
 }
@@ -335,7 +360,15 @@ function Month({ value, onChange }: P<Record<string, string>>) {
 interface Person { name: string; note: string }
 function People({ value, onChange }: P<Person[]>) {
   const { rows, ref, set, onKey } = useRows<Person>(value, (r) => !r.name && !r.note, () => ({ name: '', note: '' }), 3, onChange)
+  const file = useRef<HTMLInputElement>(null)
+  const add = (got: Contact[]) => got.length && onChange([...(value ?? []), ...got])
+  const bring = async () => {
+    const got = await pickContacts() // the system contact picker, where the device offers one
+    if (got) add(got)
+    else file.current?.click() // otherwise a contact card (.vcf) shared from Contacts
+  }
   return (
+    <>
     <div className="rows" ref={ref}>
       {rows.map((r, i) => (
         <div className="row person" key={i}>
@@ -347,6 +380,18 @@ function People({ value, onChange }: P<Person[]>) {
         </div>
       ))}
     </div>
+    <button className="btn soft bring" onClick={bring} title={hasContactPicker() ? undefined : 'Choose a contact card (.vcf) shared from your Contacts app'}>
+      <Icon name="UserPlus" size={14} /> {hasContactPicker() ? 'Add from Contacts' : 'Import contact cards'}
+    </button>
+    <input
+      ref={file} type="file" accept=".vcf,text/vcard,text/x-vcard" multiple hidden
+      onChange={async (e) => {
+        const texts = await Promise.all([...(e.target.files ?? [])].map((f) => f.text()))
+        add(texts.flatMap(parseVcards))
+        e.target.value = ''
+      }}
+    />
+    </>
   )
 }
 
@@ -403,7 +448,7 @@ function Mood({ value, onChange }: P<Record<string, number>>) {
   )
 }
 
-export function SectionView({ s, value, onChange }: { s: Section } & P) {
+export function SectionView({ s, value, onChange, title = '' }: { s: Section; title?: string } & P) {
   const body = (() => {
     switch (s.kind) {
       case 'checklist': return <Checklist value={value} onChange={onChange} rows={s.rows} placeholder={s.placeholder} />
@@ -415,7 +460,7 @@ export function SectionView({ s, value, onChange }: { s: Section } & P) {
       case 'fields': return <Fields value={value} onChange={onChange} fields={s.fields} />
       case 'slots': return <Slots value={value} onChange={onChange} labels={s.labels} />
       case 'dates': return <Dates value={value} onChange={onChange} />
-      case 'countdown': return <Countdown value={value} onChange={onChange} />
+      case 'countdown': return <Countdown value={value} onChange={onChange} title={title} />
       case 'link': return <LinkBox value={value} onChange={onChange} />
       case 'number': return <NumberBox value={value} onChange={onChange} />
       case 'month': return <Month value={value} onChange={onChange} />
@@ -424,6 +469,11 @@ export function SectionView({ s, value, onChange }: { s: Section } & P) {
       case 'mood': return <Mood value={value} onChange={onChange} />
       case 'gmail': return <GoogleInbox />
       case 'agenda': return <GoogleAgenda days={s.days} quiet={s.quiet} />
+      case 'swatch': return <Swatch value={value} onChange={onChange} />
+      case 'place': return <Place value={value} onChange={onChange} title={title} />
+      case 'weather': return <Weather value={value} onChange={onChange} />
+      case 'timer': return <FocusTimer value={value} onChange={onChange} title={title} />
+      case 'upcoming': return <Upcoming />
     }
   })()
   if (body === null) return null

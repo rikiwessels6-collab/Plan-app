@@ -22,9 +22,12 @@ export const CATALOG: CardType[] = [
   { id: 'next', name: 'Next up', group: 'Daily', icon: 'ArrowRight', sections: [list('items', undefined, 4)] },
   { id: 'note', name: 'Note', group: 'Daily', icon: 'FileText', sections: [text()] },
   { id: 'sticky', name: 'Sticky', group: 'Daily', icon: 'StickyNote', sections: [
-    { kind: 'text', key: 'text', placeholder: 'A thought…', look: 'sticky' }] },
+    { kind: 'text', key: 'text', placeholder: 'A thought…', look: 'sticky' }, { kind: 'swatch', key: 'color' }] },
   { id: 'inbox', name: 'Brain dump', group: 'Daily', icon: 'Zap', sections: [list('items', undefined, 4, 'Get it out of your head')] },
   { id: 'reminders', name: 'Reminders', group: 'Daily', icon: 'BellRing', sections: [{ kind: 'dates', key: 'dates' }] },
+  { id: 'upcoming', name: 'Upcoming', group: 'Daily', icon: 'CalendarCheck', sections: [{ kind: 'upcoming', key: 'up' }] },
+  { id: 'timer', name: 'Focus timer', group: 'Daily', icon: 'Hourglass', sections: [{ kind: 'timer', key: 'timer' }] },
+  { id: 'weather', name: 'Weather', group: 'Daily', icon: 'CloudSun', sections: [{ kind: 'weather', key: 'wx' }] },
 
   // Time
   { id: 'week', name: 'Week', group: 'Time', icon: 'CalendarRange', sections: [{ kind: 'slots', key: 'days', labels: WEEK }, text('notes', 'Notes', '')] },
@@ -44,7 +47,7 @@ export const CATALOG: CardType[] = [
   { id: 'grid', name: 'Photo grid', group: 'Photos and links', icon: 'Images', sections: [{ kind: 'photos', key: 'photos' }] },
   { id: 'mood', name: 'Mood', group: 'Photos and links', icon: 'FaceSlightlySmiling', sections: [{ kind: 'mood', key: 'mood' }] },
   { id: 'place', name: 'Place', group: 'Photos and links', icon: 'MapPin', sections: [
-    { kind: 'photo', key: 'photo' }, { kind: 'fields', key: 'f', fields: ['Address', 'Why go'] }, { kind: 'link', key: 'link' }] },
+    { kind: 'photo', key: 'photo' }, { kind: 'place', key: 'pin' }, { kind: 'fields', key: 'f', fields: ['Address', 'Why go'] }, { kind: 'link', key: 'link' }] },
   { id: 'link', name: 'Link', group: 'Photos and links', icon: 'Link', sections: [{ kind: 'link', key: 'link' }, text('notes', undefined, 'Why it matters')] },
 
   // Lists
@@ -63,7 +66,7 @@ export const CATALOG: CardType[] = [
     { kind: 'fields', key: 'f', fields: ['Phone', 'Email', 'Birthday'] }, text('notes', 'Notes', '')] },
   { id: 'call', name: 'Call', group: 'People', icon: 'Phone', sections: [
     { kind: 'fields', key: 'f', fields: ['With', 'When'] }, list('ask', 'To discuss', 3), text('notes', 'Notes', '')] },
-  { id: 'waiting', name: 'Waiting on', group: 'People', icon: 'Hourglass', sections: [list('items', undefined, 4, 'Who owes you what')] },
+  { id: 'waiting', name: 'Waiting on', group: 'People', icon: 'UserRoundCheck', sections: [list('items', undefined, 4, 'Who owes you what')] },
   { id: 'meeting', name: 'Meeting', group: 'People', icon: 'Users', sections: [
     { kind: 'fields', key: 'f', fields: ['When', 'With'] }, list('agenda', 'Agenda', 3), list('actions', 'Actions', 3)] },
   { id: 'client', name: 'Client', group: 'People', icon: 'Briefcase', sections: [

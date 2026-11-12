@@ -1,20 +1,16 @@
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { CATALOG, GROUPS, typeOf } from './catalog'
+import { setBadge, shareCard } from './device'
 import { useCardDrag, useFlip } from './drag'
-import { connect, disconnect, reconnect, setClientId, useGoogle } from './google'
-import { Icon, SectionView } from './sections'
-import { Ctx, DispatchCtx, loadState, reducer, saveState, starter, useApp, useDispatch, type Starter } from './store'
+import { Palette, type Command } from './palette'
+import { Icon, SectionView, shrink } from './sections'
+import { Settings } from './settings'
+import { Ctx, DispatchCtx, emptyHistory, loadState, reducer, saveState, starter, today, useApp, useDispatch, type Action, type Starter } from './store'
+import { useSync } from './sync'
 import { uid, type Card, type Space, type State } from './types'
 import { Sheet, UIProvider, useUI } from './ui'
 
-export type Theme = 'system' | 'light' | 'dark'
-export function applyTheme(t: Theme) {
-  if (t === 'system') delete document.documentElement.dataset.theme
-  else document.documentElement.dataset.theme = t
-  const dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
-  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#151412' : '#f3f0e8')
-}
-const savedTheme = () => (localStorage.getItem('plan.theme') as Theme | null) ?? 'system'
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
 function useDismiss(open: boolean, close: () => void) {
   const ref = useRef<HTMLDivElement>(null)
@@ -47,7 +43,10 @@ function Picker({ onClose, onAdd }: { onClose: () => void; onAdd: (type: string)
             }}
           >
             <Icon name="Search" />
-            <input autoFocus={matchMedia('(pointer: fine)').matches} value={q} placeholder="Search 57 cards" aria-label="Search cards" enterKeyHint="go" onChange={(e) => setQ(e.target.value)} />
+            <input
+              autoFocus={matchMedia('(pointer: fine)').matches} value={q} placeholder={`Search ${CATALOG.length} cards`}
+              aria-label="Search cards" enterKeyHint="go" onChange={(e) => setQ(e.target.value)}
+            />
           </form>
           <div className="sheet-body">
             {GROUPS.map((g) => {
@@ -75,107 +74,67 @@ function Picker({ onClose, onAdd }: { onClose: () => void; onAdd: (type: string)
   )
 }
 
-function Settings({ onClose }: { onClose: () => void }) {
-  const { state, dispatch } = useApp()
-  const ui = useUI()
-  const g = useGoogle()
-  const [id, setId] = useState(g.clientId)
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState('')
-  const [theme, setTheme] = useState<Theme>(savedTheme)
-  const file = useRef<HTMLInputElement>(null)
-
-  const run = (p: Promise<void>) => {
-    setBusy(true)
-    setErr('')
-    p.catch((e) => setErr(e.message)).finally(() => setBusy(false))
-  }
-  const pickTheme = (t: Theme) => {
-    setTheme(t)
-    localStorage.setItem('plan.theme', t)
-    applyTheme(t)
-  }
-  const exportAll = () => {
-    const a = document.createElement('a')
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(state)], { type: 'application/json' }))
-    a.download = 'plan-backup.json'
-    a.click()
-    URL.revokeObjectURL(a.href)
-    ui.toast('Backup downloaded')
-  }
-  const importAll = async (f?: File) => {
-    if (!f) return
-    try {
-      const s = JSON.parse(await f.text()) as State
-      if (!Array.isArray(s.cards) || !Array.isArray(s.boards) || !s.boards.length) throw new Error()
-      if (await ui.confirm({ title: 'Restore this backup?', body: 'It replaces everything currently on this device.', cta: 'Restore', danger: true })) {
-        dispatch({ t: 'load', state: s })
-        ui.toast('Backup restored')
-      }
-    } catch {
-      setErr('That file is not a Plan backup.')
-    }
-  }
-
+const STARTS: { id: Starter; name: string; text: string; icon: string }[] = [
+  { id: 'life', name: 'My life', text: 'Today, habits, goals, meals, money', icon: 'Sun' },
+  { id: 'work', name: 'Work', text: 'Projects, meetings, inbox, calendar', icon: 'Briefcase' },
+  { id: 'home', name: 'Home and family', text: 'Meals, shopping, jobs, birthdays', icon: 'House' },
+  { id: 'blank', name: 'Blank board', text: 'Start empty and add your own cards', icon: 'Plus' },
+]
+function Starts({ pick, setPick }: { pick: Starter; setPick: (s: Starter) => void }) {
   return (
-    <Sheet title="Settings" onClose={onClose}>
-      <div className="sheet-body settings">
-        <h3>Appearance</h3>
-        <div className="seg" role="radiogroup" aria-label="Theme">
-          {(['system', 'light', 'dark'] as Theme[]).map((t) => (
-            <button key={t} role="radio" aria-checked={theme === t} onClick={() => pickTheme(t)}>
-              <Icon name={t === 'system' ? 'Monitor' : t === 'light' ? 'Sun' : 'Moon'} size={15} />
-              {t[0].toUpperCase() + t.slice(1)}
-            </button>
-          ))}
-        </div>
+    <div className="starts" role="radiogroup" aria-label="Starting point">
+      {STARTS.map((s) => (
+        <button type="button" key={s.id} role="radio" aria-checked={pick === s.id} onClick={() => setPick(s.id)}>
+          <span><Icon name={s.icon} size={18} /></span>
+          <b>{s.name}</b>
+          <small>{s.text}</small>
+        </button>
+      ))}
+    </div>
+  )
+}
 
-        <h3>Google accounts</h3>
-        {g.accounts.map((a) => {
-          const ok = g.live.some((l) => l.email === a.email)
-          return (
-            <div className="acct" key={a.email}>
-              <span className="avatar">{a.email[0].toUpperCase()}</span>
-              <div>
-                <b>{a.email}</b>
-                <small>{ok ? 'Gmail and Calendar connected' : 'Session ended'}</small>
-              </div>
-              {!ok && <button className="btn soft" disabled={busy} onClick={() => run(reconnect(a.email))}>Reconnect</button>}
-              <button className="ghost" aria-label={`Remove ${a.email}`} onClick={() => disconnect(a.email)}><Icon name="LogOut" /></button>
-            </div>
-          )
-        })}
-        {g.clientId ? (
-          <button className="btn" disabled={busy} onClick={() => run(connect())}>
-            {busy ? 'Waiting for Google…' : g.accounts.length ? 'Add another account' : 'Connect Google account'}
-          </button>
-        ) : (
-          <p className="hint">
-            Gmail and Calendar need a Google client ID: a free, one-time setup described in the README. Paste it
-            below. It stays on this device.
-          </p>
-        )}
-        <div className="field">
-          <input
-            value={id} placeholder="Client ID ending .apps.googleusercontent.com" aria-label="Google client ID"
-            autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => setId(e.target.value)}
-          />
-          <button className="btn soft" disabled={id.trim() === g.clientId} onClick={() => (setClientId(id), ui.toast('Client ID saved'))}>Save</button>
-        </div>
-        {err && <p className="err">{err}</p>}
-
-        <h3>Your data</h3>
-        <p className="hint">Everything is saved on this device. Download a backup to keep a copy or move it.</p>
-        <div className="btns">
-          <button className="btn soft" onClick={exportAll}><Icon name="Download" size={14} /> Download backup</button>
-          <button className="btn soft" onClick={() => file.current?.click()}><Icon name="Upload" size={14} /> Restore backup</button>
-          <input ref={file} type="file" accept="application/json" hidden onChange={(e) => importAll(e.target.files?.[0])} />
-        </div>
-
-        <h3>Shortcuts</h3>
-        <p className="hint keys"><kbd>N</kbd> new card <kbd>/</kbd> search <kbd>Esc</kbd> close</p>
-      </div>
+function NewBoard({ onClose }: { onClose: () => void }) {
+  const dispatch = useDispatch()
+  const [name, setName] = useState('')
+  const [pick, setPick] = useState<Starter>('blank')
+  return (
+    <Sheet title="New board" onClose={onClose}>
+      {(close) => (
+        <form
+          className="sheet-body newboard"
+          onSubmit={(e) => {
+            e.preventDefault()
+            dispatch({ t: 'addBoard', name: name.trim() || STARTS.find((s) => s.id === pick)!.name, kind: pick })
+            scrollTo(0, 0)
+            close()
+          }}
+        >
+          <div className="field">
+            <input autoFocus value={name} placeholder="Name, for example Wedding or Q3 launch" aria-label="Board name" onChange={(e) => setName(e.target.value)} />
+          </div>
+          <h3>Start from</h3>
+          <Starts pick={pick} setPick={setPick} />
+          <button className="btn big">Create board</button>
+        </form>
+      )}
     </Sheet>
+  )
+}
+
+function Welcome({ onStart }: { onStart: (k: Starter) => void }) {
+  const [pick, setPick] = useState<Starter>('life')
+  return (
+    <main className="welcome">
+      <div>
+        <img src="./logo.svg" alt="" width="56" height="56" />
+        <h1>Everything you’re planning, on one board.</h1>
+        <p>Tasks, notes, photos, money, mail and calendar side by side. Pick a starting point; you can change every card later.</p>
+        <Starts pick={pick} setPick={setPick} />
+        <button className="btn big" onClick={() => onStart(pick)}>Create my board</button>
+        <small className="hint">Saved privately on this device. No account needed.</small>
+      </div>
+    </main>
   )
 }
 
@@ -185,13 +144,15 @@ function CardBody({ card }: { card: Card }) {
     <>
       {typeOf(card.type).sections.map((s) => (
         <SectionView
-          key={s.key} s={s} value={card.data[s.key]}
+          key={s.key} s={s} value={card.data[s.key]} title={card.title}
           onChange={(value) => dispatch({ t: 'setData', id: card.id, key: s.key, value })}
         />
       ))}
     </>
   )
 }
+const hasDone = (card: Card) =>
+  typeOf(card.type).sections.some((s) => s.kind === 'checklist' && (card.data[s.key] as any[] | undefined)?.some((i) => i.done))
 
 interface CardProps {
   card: Card
@@ -203,18 +164,25 @@ interface CardProps {
 }
 const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete, startDrag }: CardProps) {
   const dispatch = useDispatch()
+  const ui = useUI()
   const type = typeOf(card.type)
   const space = spaces.find((s) => s.id === card.spaceId)
   const [menu, setMenu] = useState(false)
   const ref = useDismiss(menu, () => setMenu(false))
-  const act = (a: Parameters<typeof dispatch>[0]) => {
+  const act = (a: Action) => {
     dispatch(a)
     setMenu(false)
+  }
+  const share = async () => {
+    setMenu(false)
+    const r = await shareCard(card)
+    if (r === 'copied') ui.toast('Copied as text')
+    else if (r === 'failed') ui.toast('Could not share this card')
   }
   return (
     <article
       className={`card t-${card.type}${type.bare ? ' bare' : ''}${menu ? ' menu-open' : ''}`}
-      data-card={card.id} style={{ '--i': Math.min(index, 14) } as React.CSSProperties}
+      data-card={card.id} data-color={card.data.color || undefined} style={{ '--i': Math.min(index, 14) } as React.CSSProperties}
     >
       <header onPointerDown={(e) => startDrag(e, card.id)}>
         <button
@@ -234,6 +202,7 @@ const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete,
           {menu && (
             <div className="menu" role="menu">
               <button role="menuitem" onClick={() => (setMenu(false), onOpen(card.id))}><Icon name="Maximize2" /> Open</button>
+              <button role="menuitem" onClick={share}><Icon name="Share" /> Share</button>
               <hr />
               <div className="spacepick" role="group" aria-label="Space">
                 <button
@@ -249,6 +218,7 @@ const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete,
                 ))}
               </div>
               <hr />
+              {hasDone(card) && <button role="menuitem" onClick={() => act({ t: 'clearDone', id: card.id })}><Icon name="ListX" /> Clear finished</button>}
               <button role="menuitem" onClick={() => act({ t: 'moveCard', id: card.id, step: -1 })}><Icon name="ArrowUp" /> Move earlier</button>
               <button role="menuitem" onClick={() => act({ t: 'moveCard', id: card.id, step: 1 })}><Icon name="ArrowDown" /> Move later</button>
               <button role="menuitem" onClick={() => act({ t: 'dupCard', id: card.id })}><Icon name="Copy" /> Duplicate</button>
@@ -279,14 +249,14 @@ function CardSheet({ card, space, onClose }: { card: Card; space?: Space; onClos
         </div>
       }
     >
-      <div className={`sheet-body opened t-${card.type}`}>
+      <div className={`sheet-body opened t-${card.type}`} data-color={card.data.color || undefined}>
         <CardBody card={card} />
       </div>
     </Sheet>
   )
 }
 
-function BoardMenu() {
+function BoardMenu({ onNew }: { onNew: () => void }) {
   const { state, dispatch } = useApp()
   const ui = useUI()
   const [open, setOpen] = useState(false)
@@ -301,16 +271,13 @@ function BoardMenu() {
       {open && (
         <div className="menu left" role="menu">
           {state.boards.map((b) => (
-            <button role="menuitem" key={b.id} onClick={() => (dispatch({ t: 'setBoard', id: b.id }), setOpen(false))}>
+            <button role="menuitem" key={b.id} onClick={() => (dispatch({ t: 'setBoard', id: b.id }), scrollTo(0, 0), setOpen(false))}>
               {b.id === state.boardId ? <Icon name="Check" /> : <span className="gap" />} {b.name}
+              <em>{state.cards.filter((c) => c.boardId === b.id).length}</em>
             </button>
           ))}
           <hr />
-          <button role="menuitem" onClick={async () => {
-            setOpen(false)
-            const name = await ui.ask({ title: 'New board', placeholder: 'Name, for example Work', cta: 'Create' })
-            if (name) dispatch({ t: 'addBoard', name })
-          }}><Icon name="Plus" /> New board</button>
+          <button role="menuitem" onClick={() => (setOpen(false), onNew())}><Icon name="Plus" /> New board</button>
           <button role="menuitem" onClick={async () => {
             setOpen(false)
             const name = await ui.ask({ title: 'Rename board', initial: board.name, cta: 'Rename' })
@@ -322,8 +289,11 @@ function BoardMenu() {
               const n = state.cards.filter((c) => c.boardId === board.id).length
               if (await ui.confirm({
                 title: `Delete “${board.name}”?`, cta: 'Delete board', danger: true,
-                body: n ? `Its ${n} card${n > 1 ? 's' : ''} will be deleted too. This cannot be undone.` : 'This cannot be undone.',
-              })) dispatch({ t: 'removeBoard' })
+                body: n ? `Its ${n} card${n > 1 ? 's' : ''} will be deleted too.` : undefined,
+              })) {
+                dispatch({ t: 'removeBoard' })
+                ui.toast(`“${board.name}” deleted`, 'Undo', () => dispatch({ t: 'undo' }))
+              }
             }}><Icon name="Trash" /> Delete board</button>
           )}
         </div>
@@ -332,51 +302,21 @@ function BoardMenu() {
   )
 }
 
-const STARTS: { id: Starter; name: string; text: string; icon: string }[] = [
-  { id: 'life', name: 'My life', text: 'Today, habits, goals, meals, money', icon: 'Sun' },
-  { id: 'work', name: 'Work', text: 'Projects, meetings, inbox, calendar', icon: 'Briefcase' },
-  { id: 'home', name: 'Home and family', text: 'Meals, shopping, jobs, birthdays', icon: 'House' },
-  { id: 'blank', name: 'Blank board', text: 'Start empty and add your own cards', icon: 'Plus' },
-]
-function Welcome({ onStart }: { onStart: (k: Starter) => void }) {
-  const [pick, setPick] = useState<Starter>('life')
-  return (
-    <main className="welcome">
-      <div>
-        <img src="./logo.svg" alt="" width="56" height="56" />
-        <h1>Everything you’re planning, on one board.</h1>
-        <p>Tasks, notes, photos, money, mail and calendar side by side. Pick a starting point; you can change every card later.</p>
-        <div className="starts" role="radiogroup" aria-label="Starting point">
-          {STARTS.map((s) => (
-            <button key={s.id} role="radio" aria-checked={pick === s.id} onClick={() => setPick(s.id)}>
-              <span><Icon name={s.icon} size={18} /></span>
-              <b>{s.name}</b>
-              <small>{s.text}</small>
-            </button>
-          ))}
-        </div>
-        <button className="btn big" onClick={() => onStart(pick)}>Create my board</button>
-        <small className="hint">Saved privately on this device. No account needed.</small>
-      </div>
-    </main>
-  )
-}
+type Overlay = null | 'picker' | 'settings' | 'palette' | 'newboard'
 
-function Board() {
-  const { state, dispatch } = useApp()
+function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: (a: Action) => void; canUndo: boolean; canRedo: boolean }) {
   const ui = useUI()
-  const [picker, setPicker] = useState(false)
-  const [settings, setSettings] = useState(false)
+  const [overlay, setOverlay] = useState<Overlay>(null)
   const [openId, setOpenId] = useState<string | null>(null)
   const [filter, setFilter] = useState<string | null>(null)
-  const [searching, setSearching] = useState(false)
-  const [q, setQ] = useState('')
   const [scrolled, setScrolled] = useState(false)
-  const [fresh, setFresh] = useState<string | null>(null)
+  const [target, setTarget] = useState<{ id: string; fresh: boolean } | null>(null)
+  const [dropping, setDropping] = useState(false)
   const boardRef = useRef<HTMLElement>(null)
   const stateRef = useRef(state)
   stateRef.current = state
   const startDrag = useCardDrag(dispatch)
+  useSync(state, dispatch)
 
   useEffect(() => {
     const on = () => setScrolled(scrollY > 4)
@@ -384,33 +324,75 @@ function Board() {
     return () => removeEventListener('scroll', on)
   }, [])
 
+  // keyboard: / or Cmd-K search, N new card, Cmd-Z undo
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
-      const typing = (e.target as HTMLElement).closest('input, textarea, select, [role=dialog], [role=alertdialog]')
-      if ((e.key === 'k' && (e.metaKey || e.ctrlKey)) || (e.key === 'n' && !typing && !e.metaKey && !e.ctrlKey)) {
+      const el = e.target as HTMLElement
+      const typing = !!el.closest('input, textarea, select')
+      const modal = !!el.closest('[role=dialog], [role=alertdialog]')
+      const mod = e.metaKey || e.ctrlKey
+      if (mod && e.key.toLowerCase() === 'k') (e.preventDefault(), setOverlay('palette'))
+      else if (modal || typing) return
+      else if (e.key === '/') (e.preventDefault(), setOverlay('palette'))
+      else if (e.key === 'n' && !mod) (e.preventDefault(), setOverlay('picker'))
+      else if (mod && e.key.toLowerCase() === 'z') {
         e.preventDefault()
-        setPicker(true)
-      } else if (e.key === '/' && !typing) {
-        e.preventDefault()
-        setSearching(true)
+        dispatch({ t: e.shiftKey ? 'redo' : 'undo' })
       }
     }
     document.addEventListener('keydown', key)
     return () => document.removeEventListener('keydown', key)
-  }, [])
+  }, [dispatch])
 
-  // bring a newly added card into view and make it obvious which one it is
+  // a new day: Today and Day plan cards drop what was finished and keep the rest
   useEffect(() => {
-    if (!fresh) return
-    const el = boardRef.current?.querySelector<HTMLElement>(`[data-card="${fresh}"]`)
+    const check = () => {
+      const day = today()
+      const stale = stateRef.current.cards.filter((c) => (c.type === 'today' || c.type === 'day') && c.data._day !== day)
+      if (!stale.length) return
+      const cleared = stale
+        .filter((c) => c.data._day)
+        .reduce((n, c) => n + typeOf(c.type).sections.reduce((m, s) => m + (s.kind === 'checklist' ? ((c.data[s.key] as any[]) ?? []).filter((i) => i.done).length : 0), 0), 0)
+      dispatch({ t: 'rollover', day })
+      if (cleared) ui.toast(`New day. ${cleared} finished item${cleared > 1 ? 's' : ''} cleared.`, 'Undo', () => dispatch({ t: 'undo' }))
+    }
+    check()
+    const iv = setInterval(check, 60000)
+    const wake = () => document.visibilityState === 'visible' && check()
+    document.addEventListener('visibilitychange', wake)
+    return () => {
+      clearInterval(iv)
+      document.removeEventListener('visibilitychange', wake)
+    }
+  }, [dispatch, ui])
+
+  // home-screen badge: what is still open in Today's top list, plus anything dated today
+  useEffect(() => {
+    const day = today()
+    let n = 0
+    for (const c of state.cards) {
+      if (c.type === 'today') n += ((c.data.top as any[]) ?? []).filter((i) => i.text && !i.done).length
+      for (const [k, v] of Object.entries(c.data)) if (!k.startsWith('_') && Array.isArray(v)) n += v.filter((r: any) => r?.date === day).length
+    }
+    setBadge(n)
+  }, [state.cards])
+
+  // bring a card into view and make it obvious which one it is
+  useEffect(() => {
+    if (!target) return
+    const el = boardRef.current?.querySelector<HTMLElement>(`[data-card="${target.id}"]`)
     if (!el) return
-    el.scrollIntoView({ block: 'center', behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth' })
-    el.dataset.fresh = '1'
-    if (matchMedia('(pointer: fine)').matches)
+    el.scrollIntoView({ block: 'center', behavior: calm() ? 'auto' : 'smooth' })
+    el.dataset[target.fresh ? 'fresh' : 'flash'] = '1'
+    if (target.fresh && matchMedia('(pointer: fine)').matches)
       el.querySelector<HTMLElement>('[data-row], .sec textarea, .sec input:not([type=file])')?.focus({ preventScroll: true })
-    const t = setTimeout(() => (delete el.dataset.fresh, setFresh(null)), 1400)
+    const t = setTimeout(() => {
+      delete el.dataset.fresh
+      delete el.dataset.flash
+      setTarget(null)
+    }, 1400)
     return () => clearTimeout(t)
-  }, [fresh])
+  }, [target])
 
   const onOpen = useCallback((id: string) => setOpenId(id), [])
   const onDelete = useCallback(
@@ -421,46 +403,101 @@ function Board() {
     },
     [dispatch, ui],
   )
+  const jumpTo = useCallback(
+    (id: string) => {
+      const card = stateRef.current.cards.find((c) => c.id === id)
+      if (!card) return
+      if (card.boardId !== stateRef.current.boardId) dispatch({ t: 'setBoard', id: card.boardId })
+      setFilter(null)
+      setTarget({ id, fresh: false })
+    },
+    [dispatch],
+  )
 
   const space = state.spaces.find((s) => s.id === filter)
-  const needle = q.trim().toLowerCase()
-  const cards = useMemo(
-    () =>
-      state.cards.filter(
-        (c) =>
-          c.boardId === state.boardId &&
-          (!space || c.spaceId === space.id) &&
-          (!needle ||
-            c.title.toLowerCase().includes(needle) ||
-            // search what people typed, not embedded photo data
-            JSON.stringify(c.data, (_k, v) => (typeof v === 'string' && v.startsWith('data:') ? '' : v)).toLowerCase().includes(needle)),
-      ),
-    [state.cards, state.boardId, space, needle],
-  )
+  const onBoard = useMemo(() => state.cards.filter((c) => c.boardId === state.boardId), [state.cards, state.boardId])
+  const cards = useMemo(() => (space ? onBoard.filter((c) => c.spaceId === space.id) : onBoard), [onBoard, space])
   useFlip(boardRef, cards.map((c) => c.id).join() + state.cols)
 
-  const add = (type: string) => {
-    const id = uid()
-    dispatch({ t: 'addCard', id, type, spaceId: space?.id })
-    setQ('')
-    setFresh(id)
-  }
+  const add = useCallback(
+    (type: string, data?: Record<string, any>) => {
+      const id = uid()
+      dispatch({ t: 'addCard', id, type, spaceId: filter ?? undefined, data })
+      setTarget({ id, fresh: true })
+    },
+    [dispatch, filter],
+  )
+  const capture = useCallback(
+    (card: Card, key: string, text: string) => {
+      const live = stateRef.current.cards.find((c) => c.id === card.id) ?? card
+      dispatch({ t: 'setData', id: card.id, key, value: [...((live.data[key] as any[]) ?? []), { text, done: false }] })
+      ui.toast(`Added to ${card.title || 'Untitled'}`)
+    },
+    [dispatch, ui],
+  )
+
+  // photos: paste one, or drop files anywhere on the board
+  useEffect(() => {
+    const addPhotos = async (files: File[]) => {
+      const imgs = files.filter((f) => f.type.startsWith('image/'))
+      for (const f of imgs) add('photo', { photo: { src: await shrink(f) } })
+      return imgs.length
+    }
+    const paste = (e: ClipboardEvent) => {
+      if ((e.target as HTMLElement).closest?.('input, textarea')) return
+      const files = [...(e.clipboardData?.files ?? [])]
+      if (files.some((f) => f.type.startsWith('image/'))) (e.preventDefault(), addPhotos(files))
+    }
+    const hasFiles = (e: DragEvent) => !!e.dataTransfer?.types.includes('Files')
+    const over = (e: DragEvent) => hasFiles(e) && (e.preventDefault(), setDropping(true))
+    const leave = (e: DragEvent) => !e.relatedTarget && setDropping(false)
+    const drop = (e: DragEvent) => {
+      if (!hasFiles(e)) return
+      e.preventDefault()
+      setDropping(false)
+      addPhotos([...(e.dataTransfer?.files ?? [])]).then((n) => !n && ui.toast('Only photos can be dropped here'))
+    }
+    document.addEventListener('paste', paste)
+    addEventListener('dragover', over)
+    addEventListener('dragleave', leave)
+    addEventListener('drop', drop)
+    return () => {
+      document.removeEventListener('paste', paste)
+      removeEventListener('dragover', over)
+      removeEventListener('dragleave', leave)
+      removeEventListener('drop', drop)
+    }
+  }, [add, ui])
+
+  const commands = useMemo<Command[]>(
+    () => [
+      { name: 'New card', icon: 'Plus', hint: 'N', run: () => setOverlay('picker') },
+      { name: 'New board', icon: 'LayoutGrid', run: () => setOverlay('newboard') },
+      ...(canUndo ? [{ name: 'Undo', icon: 'Undo2', hint: '⌘Z', run: () => dispatch({ t: 'undo' }) } as Command] : []),
+      ...(canRedo ? [{ name: 'Redo', icon: 'Redo2', hint: '⇧⌘Z', run: () => dispatch({ t: 'redo' }) } as Command] : []),
+      { name: 'Settings', icon: 'Settings', run: () => setOverlay('settings') },
+    ],
+    [canUndo, canRedo, dispatch],
+  )
+  const ctx = useMemo(() => ({ state, dispatch, openSettings: () => setOverlay('settings'), jumpTo }), [state, dispatch, jumpTo])
   const opened = state.cards.find((c) => c.id === openId)
-  const total = state.cards.filter((c) => c.boardId === state.boardId).length
+  const close = useCallback(() => setOverlay(null), [])
+  // commands chosen in the palette open another overlay, so they must not be closed again by the palette
+  const closePalette = useCallback(() => setOverlay((o) => (o === 'palette' ? null : o)), [])
 
   return (
-    <>
+    <Ctx.Provider value={ctx}>
       <div className={`top${scrolled ? ' scrolled' : ''}`}>
         <div className="bar1">
           <div className="brand">
             <img src="./logo.svg" alt="" width="34" height="34" />
             <div>
               <small>{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</small>
-              <BoardMenu />
+              <BoardMenu onNew={() => setOverlay('newboard')} />
             </div>
           </div>
           <div className="tools">
-            <button className="ghost" aria-label="Search" aria-pressed={searching} onClick={() => (setSearching(!searching), setQ(''))}>
+            <button className="ghost" aria-label="Search and capture" title="Search and capture (/)" onClick={() => setOverlay('palette')}>
               <Icon name="Search" size={18} />
             </button>
             <div className="zoom" role="group" aria-label="Columns">
@@ -468,22 +505,11 @@ function Board() {
               <b aria-live="polite">{state.cols}</b>
               <button className="ghost" aria-label="More columns" disabled={state.cols >= 8} onClick={() => dispatch({ t: 'setCols', cols: state.cols + 1 })}><Icon name="Plus" /></button>
             </div>
-            <button className="ghost" aria-label="Settings" onClick={() => setSettings(true)}><Icon name="Settings" size={18} /></button>
+            <button className="ghost" aria-label="Settings" onClick={() => setOverlay('settings')}><Icon name="Settings" size={18} /></button>
           </div>
         </div>
-        {searching && (
-          <div className="search">
-            <Icon name="Search" />
-            <input
-              autoFocus value={q} placeholder="Search this board" aria-label="Search this board"
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => e.key === 'Escape' && (setSearching(false), setQ(''))}
-            />
-            {q && <button className="ghost" aria-label="Clear search" onClick={() => setQ('')}><Icon name="X" size={15} /></button>}
-          </div>
-        )}
         <nav className="chips" aria-label="Spaces">
-          <button aria-pressed={!space} onClick={() => setFilter(null)}>All <em>{total}</em></button>
+          <button aria-pressed={!space} onClick={() => setFilter(null)}>All <em>{onBoard.length}</em></button>
           {state.spaces.map((s) => (
             <button key={s.id} aria-pressed={space?.id === s.id} onClick={() => setFilter(space?.id === s.id ? null : s.id)}>
               <i style={{ background: s.color }} /> {s.name}
@@ -511,31 +537,27 @@ function Board() {
       </main>
       {!cards.length && (
         <div className="empty">
-          <span><Icon name={needle ? 'Search' : 'Plus'} size={22} /></span>
-          <h2>{needle ? 'Nothing matches' : space ? `Nothing in ${space.name} yet` : 'A fresh board'}</h2>
-          <p>{needle ? `No card mentions “${q.trim()}”.` : 'Add a card to get started. There are 57 to choose from.'}</p>
-          {!needle && <button className="btn" onClick={() => setPicker(true)}>Add a card</button>}
+          <span><Icon name="Plus" size={22} /></span>
+          <h2>{space ? `Nothing in ${space.name} yet` : 'A fresh board'}</h2>
+          <p>Add a card to get started. There are {CATALOG.length} to choose from.</p>
+          <button className="btn" onClick={() => setOverlay('picker')}>Add a card</button>
         </div>
       )}
+      {dropping && <div className="dropzone" aria-hidden><span><Icon name="ImagePlus" size={26} /> Drop photos to add them</span></div>}
 
-      <button className="fab" aria-label="New card" title="New card (N)" onClick={() => setPicker(true)}><Icon name="Plus" size={24} /></button>
-      {picker && <Picker onClose={() => setPicker(false)} onAdd={add} />}
-      {settings && <Settings onClose={() => setSettings(false)} />}
+      <button className="fab" aria-label="New card" title="New card (N)" onClick={() => setOverlay('picker')}><Icon name="Plus" size={24} /></button>
+      {overlay === 'picker' && <Picker onClose={close} onAdd={add} />}
+      {overlay === 'settings' && <Settings onClose={close} />}
+      {overlay === 'newboard' && <NewBoard onClose={close} />}
+      {overlay === 'palette' && <Palette cards={onBoard} commands={commands} onClose={closePalette} onJump={jumpTo} onNew={add} onCapture={capture} />}
       {opened && <CardSheet card={opened} space={state.spaces.find((s) => s.id === opened.spaceId)} onClose={() => setOpenId(null)} />}
-      <SettingsBridge open={() => setSettings(true)} />
-    </>
+    </Ctx.Provider>
   )
 }
 
-// lets cards deep in the tree (the "Connect Google" prompt) open Settings
-let openSettingsFn = () => {}
-function SettingsBridge({ open }: { open: () => void }) {
-  openSettingsFn = open
-  return null
-}
-
 export default function App() {
-  const [state, dispatch] = useReducer(reducer, null as unknown as State)
+  const [h, dispatch] = useReducer(reducer, emptyHistory)
+  const state = h.present
   const [ready, setReady] = useState(false)
   const [saveErr, setSaveErr] = useState(false)
 
@@ -545,13 +567,21 @@ export default function App() {
       setReady(true)
     })
   }, [])
+  // save shortly after each change, and straight away when the app is put in the background
   useEffect(() => {
     if (!state) return
-    const t = setTimeout(() => saveState(state).then(() => setSaveErr(false), () => setSaveErr(true)), 300)
-    return () => clearTimeout(t)
+    const save = () => saveState(state).then(() => setSaveErr(false), () => setSaveErr(true))
+    const t = setTimeout(save, 300)
+    const hide = () => document.visibilityState === 'hidden' && save()
+    document.addEventListener('visibilitychange', hide)
+    addEventListener('pagehide', save)
+    return () => {
+      clearTimeout(t)
+      document.removeEventListener('visibilitychange', hide)
+      removeEventListener('pagehide', save)
+    }
   }, [state])
 
-  const ctx = useMemo(() => ({ state, dispatch, openSettings: () => openSettingsFn() }), [state])
   if (!ready) return null
   return (
     <UIProvider>
@@ -559,10 +589,8 @@ export default function App() {
         <Welcome onStart={(k) => dispatch({ t: 'load', state: starter(k) })} />
       ) : (
         <DispatchCtx.Provider value={dispatch}>
-          <Ctx.Provider value={ctx}>
-            <Board />
-            {saveErr && <p className="err banner" role="alert">Could not save to this device. Download a backup from Settings.</p>}
-          </Ctx.Provider>
+          <Board state={state} dispatch={dispatch} canUndo={h.past.length > 0} canRedo={h.future.length > 0} />
+          {saveErr && <p className="err banner" role="alert">Could not save to this device. Download a backup from Settings.</p>}
         </DispatchCtx.Provider>
       )}
     </UIProvider>

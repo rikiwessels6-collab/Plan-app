@@ -2,10 +2,11 @@ import '@fontsource-variable/geist'
 import '@fontsource-variable/fraunces'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import App, { applyTheme, type Theme } from './App'
+import App from './App'
+import { applyTheme, savedTheme } from './settings'
 import './styles.css'
 
-applyTheme((localStorage.getItem('plan.theme') as Theme | null) ?? 'system')
+applyTheme(savedTheme())
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

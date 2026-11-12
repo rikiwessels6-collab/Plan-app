@@ -6,6 +6,8 @@ import { useEffect, useState, useSyncExternalStore } from 'react'
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly', // see every calendar, not only the main one
+  'https://www.googleapis.com/auth/drive.appdata', // a private app folder in Drive, used to sync the board between devices
 ].join(' ')
 
 export interface Account {
@@ -137,6 +139,13 @@ async function gfetch(a: Account, url: string, init?: RequestInit): Promise<any>
   return r.json()
 }
 
+/** Call a Google API as one of the connected accounts. */
+export function gapi(email: string, url: string, init?: RequestInit): Promise<any> {
+  const a = accounts.find((x) => x.email === email)
+  if (!a) return Promise.reject(new Error('That Google account is not connected.'))
+  return gfetch(a, url, init)
+}
+
 export function useGoogle() {
   useSyncExternalStore(
     (f) => (subs.add(f), () => subs.delete(f)),
@@ -186,6 +195,25 @@ export interface Ev {
   start: Date
   allDay: boolean
   url?: string
+  color?: string
+}
+
+const calCache = new Map<string, { at: number; list: { id: string; color?: string }[] }>()
+/** The calendars this person has ticked in Google Calendar. Falls back to the main one. */
+async function calendars(a: Account): Promise<{ id: string; color?: string }[]> {
+  const hit = calCache.get(a.email)
+  if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.list
+  let list: { id: string; color?: string }[] = [{ id: 'primary' }]
+  try {
+    const r = await gfetch(a, 'https://www.googleapis.com/calendar/v3/users/me/calendarList?minAccessRole=reader&maxResults=50')
+    const got = ((r.items ?? []) as any[]).filter((c) => c.selected && !c.hidden).slice(0, 10).map((c) => ({ id: c.id as string, color: c.backgroundColor as string }))
+    if (got.length) list = got
+  } catch (e: any) {
+    if (e?.message === 'expired') throw e
+    // connected before this permission existed: the main calendar still works
+  }
+  calCache.set(a.email, { at: Date.now(), list })
+  return list
 }
 
 async function events(a: Account, days: number): Promise<Ev[]> {
@@ -197,18 +225,34 @@ async function events(a: Account, days: number): Promise<Ev[]> {
     timeMin: from.toISOString(), timeMax: to.toISOString(),
     singleEvents: 'true', orderBy: 'startTime', maxResults: '40',
   })
-  const r = await gfetch(a, `https://www.googleapis.com/calendar/v3/calendars/primary/events?${q}`)
-  return ((r.items ?? []) as any[])
-    .filter((e) => e.status !== 'cancelled')
-    .map((e) => ({
+  const cals = await calendars(a)
+  const per = await Promise.all(
+    cals.map((c) =>
+      gfetch(a, `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(c.id)}/events?${q}`).then(
+        (r) => ((r.items ?? []) as any[]).map((e) => ({ e, color: c.color })),
+        (err) => {
+          if (c.id === 'primary' || cals.length === 1 || err?.message === 'expired') throw err
+          return [] // one unreadable shared calendar should not hide the rest
+        },
+      ),
+    ),
+  )
+  return per
+    .flat()
+    .filter(({ e }) => e.status !== 'cancelled' && e.start)
+    .map(({ e, color }) => ({
       id: e.id,
       account: a.email,
       title: e.summary || '(no title)',
       // all-day dates are plain YYYY-MM-DD: parse as local midnight, not UTC
-      start: e.start?.dateTime ? new Date(e.start.dateTime) : new Date(`${e.start?.date}T00:00:00`),
-      allDay: !e.start?.dateTime,
+      start: e.start.dateTime ? new Date(e.start.dateTime) : new Date(`${e.start.date}T00:00:00`),
+      allDay: !e.start.dateTime,
       url: e.htmlLink,
+      color,
     }))
+    // an all-day event that started earlier is still returned by Google; show it under today
+    .map((ev) => (ev.start < from ? { ...ev, start: new Date(from) } : ev))
+    .filter((ev) => ev.start < to)
 }
 
 export async function createEvent(email: string, title: string, date: string, time: string): Promise<void> {

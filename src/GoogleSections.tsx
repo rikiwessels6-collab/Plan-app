@@ -162,7 +162,7 @@ export function GoogleAgenda({ days, quiet }: { days: number; quiet?: boolean })
                 <h4>{sameDay(g.day, now) ? 'Today' : g.day.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short' })}</h4>
               )}
               {g.evs.map((e) => (
-                <a className="ev" key={e.account + e.id} href={e.url} target="_blank" rel="noreferrer">
+                <a className="ev" key={e.account + e.id} href={e.url} target="_blank" rel="noreferrer" style={e.color ? ({ '--ev': e.color } as React.CSSProperties) : undefined}>
                   <time>{e.allDay ? 'All day' : time(e.start)}</time>
                   <span>{e.title}</span>
                 </a>
