@@ -10,6 +10,6 @@
     "run_worker_first": ["/api/*"]
   },
   "d1_databases": [
-    { "binding": "DB", "database_name": "plan", "database_id": "00000000-0000-0000-0000-000000000000", "migrations_dir": "migrations" }
+    { "binding": "DB", "database_name": "plan", "database_id": "d3ea0b7e-668d-4e30-9bfa-e0fe0a35083f", "migrations_dir": "migrations" }
   ]
 }
