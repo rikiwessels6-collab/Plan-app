@@ -58,7 +58,8 @@ export function starter(kind: Starter): State {
       : [hello]
   return {
     boards: [{ id: b, name: kind === 'work' ? 'Work' : kind === 'home' ? 'Home' : 'My board' }],
-    boardId: b, cols: 4, spaces, cards,
+    // phones show as many columns as fit; tablets start roomier than a desktop
+    boardId: b, cols: typeof innerWidth === 'number' && innerWidth < 1000 ? 3 : 4, spaces, cards,
   }
 }
 
@@ -147,7 +148,11 @@ function reduce(s: State, a: Action): State {
     case 'restoreCard':
       return { ...s, cards: [...s.cards.slice(0, a.index), a.card, ...s.cards.slice(a.index)] }
     case 'addSpace':
-      return { ...s, spaces: [...s.spaces, { id: uid(), name: a.name, color: SPACE_COLORS[s.spaces.length % SPACE_COLORS.length] }] }
+      return {
+        ...s,
+        // the first colour no other space is using, so two spaces are never indistinguishable
+        spaces: [...s.spaces, { id: uid(), name: a.name, color: SPACE_COLORS.find((c) => !s.spaces.some((x) => x.color === c)) ?? SPACE_COLORS[s.spaces.length % SPACE_COLORS.length] }],
+      }
     case 'removeSpace':
       return {
         ...s,

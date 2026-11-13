@@ -124,7 +124,7 @@ export function Weather({ value, onChange }: P<{ lat?: number; lon?: number; nam
     if (!has) return setWx(null)
     let off = false
     setErr('')
-    forecast(value!.lat!, value!.lon!).then((d) => !off && setWx(d), (e) => !off && setErr(e.message || 'The forecast is unavailable right now.'))
+    forecast(value!.lat!, value!.lon!).then((d) => !off && setWx(d), (e) => !off && setErr(/fetch|network|load failed/i.test(e.message ?? '') ? 'Offline. The forecast will load when you are back online.' : e.message || 'The forecast is unavailable right now.'))
     return () => {
       off = true
     }

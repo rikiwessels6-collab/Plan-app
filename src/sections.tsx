@@ -99,6 +99,42 @@ function Grow({ value, className = '', ...rest }: { value: string } & React.Text
   )
 }
 
+/** A one-line field that wraps onto more lines instead of cutting its text off. */
+export function Line({ value, onChange, onKeyDown, ...rest }: { value: string; onChange: (v: string) => void } & Omit<React.TextareaHTMLAttributes<HTMLTextAreaElement>, 'onChange' | 'value'>) {
+  return (
+    <Grow
+      value={value} {...rest}
+      onChange={(e) => onChange(e.target.value.replace(/\n/g, ' '))}
+      onKeyDown={(e) => {
+        onKeyDown?.(e)
+        if (e.key === 'Enter' && !e.defaultPrevented) (e.preventDefault(), e.currentTarget.blur())
+      }}
+    />
+  )
+}
+
+/** A date shown as words ("12 Nov"); tapping it opens the device's own date picker. */
+function DateChip({ value, onChange, short }: { value: string; onChange: (v: string) => void; short?: boolean }) {
+  const d = value ? day(value) : null
+  const text = d
+    ? d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', ...(short || d.getFullYear() === new Date().getFullYear() ? null : { year: 'numeric' }) })
+    : 'Add date'
+  return (
+    <label className={`datechip${d ? '' : ' unset'}`}>
+      <Icon name="CalendarDays" size={13} />
+      <span>{text}</span>
+      <input
+        type="date" aria-label="Date" value={value} onChange={(e) => onChange(e.target.value)}
+        onClick={(e) => {
+          try {
+            e.currentTarget.showPicker()
+          } catch {}
+        }}
+      />
+    </label>
+  )
+}
+
 function Text({ value, onChange, placeholder, look }: P<string> & { placeholder?: string; look?: string }) {
   return <Grow className={`text ${look ?? ''}`} value={value ?? ''} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} />
 }
@@ -199,6 +235,8 @@ function Habit({ value, onChange }: P<Record<string, boolean>>) {
     <div>
       <MonthNav ym={ym} set={setYm} />
       <div className="dots">
+        {['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((d, i) => <span className="dow" key={`d${i}`}>{d}</span>)}
+        {Array.from({ length: (ym.getDay() + 6) % 7 }, (_, i) => <span key={`x${i}`} />)}
         {Array.from({ length: n }, (_, i) => {
           const k = iso(new Date(ym.getFullYear(), ym.getMonth(), i + 1))
           return (
@@ -233,19 +271,19 @@ function Amounts({ value, onChange, budget }: P<{ budget?: number | ''; rows?: A
           <div className="hint">
             left of{' '}
             <input
-              className="inline" type="number" inputMode="decimal" value={v.budget ?? ''} placeholder="budget"
+              className="inline" type="number" inputMode="decimal" value={v.budget ?? ''} placeholder="budget" style={{ width: `${Math.max(6, String(v.budget ?? '').length + 1.5)}ch` }}
               aria-label="Budget" onChange={(e) => onChange({ ...v, budget: e.target.value === '' ? '' : Number(e.target.value) })}
             />
           </div>
-          <div className="bar"><i style={{ width: `${cap ? Math.min(100, (total / cap) * 100) : 0}%` }} className={total > cap ? 'over' : ''} /></div>
+          <div className="bar"><i style={{ width: `${cap ? Math.min(100, (total / cap) * 100) : 0}%` }} className={total > cap ? 'exceeded' : ''} /></div>
         </div>
       )}
       <div className="rows" ref={ref}>
         {rows.map((r, i) => (
           <div className="row two" key={i}>
-            <input data-row value={r.label} placeholder={i === 0 ? 'What' : undefined} onChange={(e) => set(i, { label: e.target.value })} onKeyDown={onKey(i)} />
+            <Line data-row value={r.label} placeholder={i === 0 ? 'What' : undefined} aria-label="Label" onChange={(t) => set(i, { label: t })} onKeyDown={onKey(i)} />
             <input
-              className="num" type="number" inputMode="decimal" value={r.amount} placeholder={i === 0 ? '0' : undefined}
+              className="num" type="number" inputMode="decimal" value={r.amount} style={{ width: `${Math.max(4, String(r.amount).length + 1.5)}ch` }} placeholder={i === 0 ? '0' : undefined}
               aria-label="Amount" onChange={(e) => set(i, { amount: e.target.value === '' ? '' : Number(e.target.value) })}
             />
           </div>
@@ -263,7 +301,7 @@ function Fields({ value, onChange, fields, now }: P<Record<string, string>> & { 
       {fields.map((f) => (
         <label className={`row slot${f === now ? ' now' : ''}`} key={f}>
           <span>{f}</span>
-          <input value={v[f] ?? ''} onChange={(e) => onChange({ ...v, [f]: e.target.value })} />
+          <Line value={v[f] ?? ''} aria-label={f} onChange={(t) => onChange({ ...v, [f]: t })} />
         </label>
       ))}
     </div>
@@ -286,8 +324,8 @@ function Dates({ value, onChange, yearly }: P<DateRow[]> & { yearly?: boolean })
         const n = when ? daysUntil(when) : null
         return (
           <div className="row dated" key={i}>
-            <input data-row value={r.label} placeholder={i === 0 ? 'What' : undefined} onChange={(e) => set(i, { label: e.target.value })} onKeyDown={onKey(i)} />
-            <input type="date" aria-label="Date" value={r.date} onChange={(e) => set(i, { date: e.target.value })} />
+            <Line data-row value={r.label} placeholder={i === 0 ? (yearly ? 'Whose birthday' : 'What') : i === (value?.length ?? 0) ? 'Add another' : undefined} aria-label="Label" onChange={(t) => set(i, { label: t })} onKeyDown={onKey(i)} />
+            {(r.label || r.date) && <DateChip value={r.date} short={yearly} onChange={(date) => set(i, { date })} />}
             {n !== null && <em className={n < 0 ? 'past' : ''}>{n === 0 ? 'today' : n > 0 ? `in ${n}d` : `${-n}d ago`}</em>}
             {r.date && (
               <button className="ghost mini" aria-label="Add to calendar" title="Add to calendar" onClick={() => addToCalendar(r.label, when)}>
@@ -307,7 +345,7 @@ function Countdown({ value, onChange, title }: P<string> & { title: string }) {
     <div className="count">
       <div className="bigno">{n === null ? '–' : Math.abs(n)}</div>
       <div className="hint">{n === null ? 'Pick a date' : n === 0 ? 'It is today' : n > 0 ? `day${n > 1 ? 's' : ''} to go` : `day${n < -1 ? 's' : ''} ago`}</div>
-      <input type="date" aria-label="Date" value={value ?? ''} onChange={(e) => onChange(e.target.value)} />
+      <DateChip value={value ?? ''} onChange={onChange} />
       {value && (
         <button className="ghost mini" aria-label="Add to calendar" title="Add to calendar" onClick={() => addToCalendar(title, value)}>
           <Icon name="CalendarPlus" size={14} />
@@ -361,8 +399,8 @@ function NumberBox({ value, onChange }: P<{ value?: number | ''; target?: number
         <button className="ghost" aria-label="Increase" onClick={() => onChange({ ...v, value: cur + 1 })}><Icon name="Plus" /></button>
       </div>
       <div className="hint">
-        of <input className="inline" type="number" inputMode="decimal" aria-label="Target" value={v.target ?? ''} placeholder="target" onChange={num('target')} />{' '}
-        <input className="inline" aria-label="Unit" value={v.unit ?? ''} placeholder="unit" onChange={(e) => onChange({ ...v, unit: e.target.value })} />
+        of <input className="inline" type="number" inputMode="decimal" aria-label="Target" value={v.target ?? ''} placeholder="target" style={{ width: `${Math.max(6, String(v.target ?? '').length + 1.5)}ch` }} onChange={num('target')} />{' '}
+        <input className="inline unit" aria-label="Unit" value={v.unit ?? ''} placeholder="unit" style={{ width: `${Math.max(4, (v.unit ?? '').length + 1.5)}ch` }} onChange={(e) => onChange({ ...v, unit: e.target.value })} />
       </div>
       {tgt > 0 && <div className="bar"><i style={{ width: `${Math.max(0, Math.min(100, (cur / tgt) * 100))}%` }} /></div>}
     </div>
@@ -419,8 +457,8 @@ function People({ value, onChange }: P<Person[]>) {
         <div className="row person" key={i}>
           <span className="avatar">{r.name.trim()[0]?.toUpperCase() ?? ''}</span>
           <div>
-            <input data-row value={r.name} placeholder={i === 0 ? 'Name' : undefined} onChange={(e) => set(i, { name: e.target.value })} onKeyDown={onKey(i)} />
-            <input className="sub" value={r.note} placeholder={i === 0 ? 'Phone, role, note' : undefined} aria-label="Details" onChange={(e) => set(i, { note: e.target.value })} />
+            <Line data-row value={r.name} placeholder={i === 0 ? 'Name' : undefined} aria-label="Name" onChange={(t) => set(i, { name: t })} onKeyDown={onKey(i)} />
+            <Line className="sub" value={r.note} placeholder={i === 0 ? 'Phone, role, note' : undefined} aria-label="Details" onChange={(t) => set(i, { note: t })} />
           </div>
         </div>
       ))}
@@ -450,7 +488,7 @@ function Rating({ value, onChange }: P<Rate[]>) {
       <div className="rows" ref={ref}>
         {rows.map((r, i) => (
           <div className="row rate" key={i}>
-            <input data-row value={r.label} placeholder={i === 0 ? 'Area, e.g. Health' : undefined} onChange={(e) => set(i, { label: e.target.value })} onKeyDown={onKey(i)} />
+            <Line data-row value={r.label} placeholder={i === 0 ? 'Area, e.g. Health' : undefined} aria-label="Label" onChange={(t) => set(i, { label: t })} onKeyDown={onKey(i)} />
             <span className="pips">
               {[1, 2, 3, 4, 5].map((n) => (
                 <button
@@ -468,6 +506,7 @@ function Rating({ value, onChange }: P<Rate[]>) {
 }
 
 const MOODS = ['Rough', 'Low', 'Okay', 'Good', 'Great']
+const FACES = ['FaceAngry', 'FaceSlightlyFrowning', 'FaceNeutral', 'FaceSlightlySmiling', 'FaceGrinning']
 function Mood({ value, onChange }: P<Record<string, number>>) {
   const v = value ?? {}
   const today = iso(new Date())
@@ -478,13 +517,14 @@ function Mood({ value, onChange }: P<Record<string, number>>) {
   })
   return (
     <div>
-      <div className="moods">
+      <div className="faces" role="radiogroup" aria-label="How was today">
         {MOODS.map((m, i) => (
-          <button key={m} className={v[today] === i + 1 ? 'on' : ''} aria-pressed={v[today] === i + 1} onClick={() => onChange({ ...v, [today]: i + 1 })}>
-            {m}
+          <button key={m} role="radio" aria-checked={v[today] === i + 1} aria-label={m} title={m} data-m={i + 1} onClick={() => onChange({ ...v, [today]: v[today] === i + 1 ? 0 : i + 1 })}>
+            <Icon name={FACES[i]} size={22} />
           </button>
         ))}
       </div>
+      <p className="hint facelabel">{MOODS[(v[today] ?? 0) - 1] ?? 'How was today?'}</p>
       <div className="moodline" aria-label="Last two weeks">
         {last.map((k) => <i key={k} data-m={v[k] ?? 0} title={`${k}: ${MOODS[(v[k] ?? 0) - 1] ?? 'not set'}`} />)}
       </div>

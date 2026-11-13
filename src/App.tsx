@@ -4,36 +4,21 @@ import { chime, notify, saveFile, setBadge, shareCard } from './device'
 import { connect, reconnect, useGoogle } from './google'
 import { useCardDrag, useFlip } from './drag'
 import { Palette, type Command } from './palette'
-import { Icon, SectionView, shrink } from './sections'
+import { Icon, Line, SectionView, shrink } from './sections'
 import { Settings } from './settings'
 import { Ctx, DispatchCtx, emptyHistory, loadState, reducer, saveState, starter, today, useApp, useDispatch, type Action, type Starter } from './store'
 import { pull, setSyncAccount, useSync } from './sync'
 import { uid, type Card, type Space, type State } from './types'
-import { Guard, Sheet, UIProvider, useUI } from './ui'
+import { Guard, Popover, Sheet, UIProvider, useUI } from './ui'
 
 const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
-function useDismiss(open: boolean, close: () => void) {
-  const ref = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    if (!open) return
-    const down = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && close()
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && close()
-    document.addEventListener('pointerdown', down)
-    document.addEventListener('keydown', key)
-    return () => {
-      document.removeEventListener('pointerdown', down)
-      document.removeEventListener('keydown', key)
-    }
-  }, [open, close])
-  return ref
-}
 
 function Picker({ onClose, onAdd }: { onClose: () => void; onAdd: (type: string) => void }) {
   const [q, setQ] = useState('')
   const hits = CATALOG.filter((t) => t.name.toLowerCase().includes(q.trim().toLowerCase()))
   return (
-    <Sheet title="New card" onClose={onClose}>
+    <Sheet title="New card" onClose={onClose} tall>
       {(close) => (
         <>
           <form
@@ -203,7 +188,8 @@ const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete,
   const type = typeOf(card.type)
   const space = spaces.find((s) => s.id === card.spaceId)
   const [menu, setMenu] = useState(false)
-  const ref = useDismiss(menu, () => setMenu(false))
+  const btn = useRef<HTMLButtonElement>(null)
+  const closeMenu = useCallback(() => setMenu(false), [])
   const act = (a: Action) => {
     dispatch(a)
     setMenu(false)
@@ -226,16 +212,16 @@ const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete,
         >
           <Icon name={type.icon} size={14} />
         </button>
-        <input
+        <Line
           className="title" value={card.title} aria-label="Card title" placeholder="Untitled"
-          onChange={(e) => dispatch({ t: 'patchCard', id: card.id, patch: { title: e.target.value } })}
+          onChange={(title) => dispatch({ t: 'patchCard', id: card.id, patch: { title } })}
         />
-        <div className="menuwrap" ref={ref}>
-          <button className="ghost" aria-label="Card options" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+        <div className="menuwrap">
+          <button ref={btn} className="ghost" aria-label="Card options" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
             <Icon name="Ellipsis" />
           </button>
           {menu && (
-            <div className="menu" role="menu">
+            <Popover anchor={btn} onClose={closeMenu}>
               <button role="menuitem" onClick={() => (setMenu(false), onOpen(card.id))}><Icon name="Maximize2" /> Open</button>
               <button role="menuitem" onClick={share}><Icon name="Share" /> Share</button>
               <hr />
@@ -263,7 +249,7 @@ const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete,
               <button role="menuitem" onClick={() => act({ t: 'moveCard', id: card.id, step: 1 })}><Icon name="ArrowDown" /> Move later</button>
               <button role="menuitem" onClick={() => act({ t: 'dupCard', id: card.id })}><Icon name="Copy" /> Duplicate</button>
               <button role="menuitem" className="danger" onClick={() => (setMenu(false), onDelete(card))}><Icon name="Trash" /> Delete</button>
-            </div>
+            </Popover>
           )}
         </div>
       </header>
@@ -279,8 +265,9 @@ const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete,
   )
 })
 
-function CardSheet({ card, space, onClose }: { card: Card; space?: Space; onClose: () => void }) {
+function CardSheet({ card, space, onClose, onDelete }: { card: Card; space?: Space; onClose: () => void; onDelete: (card: Card) => void }) {
   const dispatch = useDispatch()
+  const ui = useUI()
   const type = typeOf(card.type)
   return (
     <Sheet
@@ -296,7 +283,17 @@ function CardSheet({ card, space, onClose }: { card: Card; space?: Space; onClos
       }
     >
       <div className={`sheet-body opened t-${card.type}`} data-color={card.data.color || undefined}>
+        {space && <div className="spacename">{space.name}</div>}
         <CardBody card={card} />
+        <div className="sheet-actions">
+          <button className="btn soft" onClick={async () => {
+            const r = await shareCard(card)
+            if (r === 'copied') ui.toast('Copied as text')
+            else if (r === 'failed') ui.toast('Could not share this card')
+          }}><Icon name="Share" size={14} /> Share</button>
+          <button className="btn soft" onClick={() => dispatch({ t: 'dupCard', id: card.id })}><Icon name="Copy" size={14} /> Duplicate</button>
+          <button className="btn soft danger" onClick={() => (onClose(), onDelete(card))}><Icon name="Trash" size={14} /> Delete</button>
+        </div>
       </div>
     </Sheet>
   )
@@ -306,16 +303,17 @@ function BoardMenu({ onNew }: { onNew: () => void }) {
   const { state, dispatch } = useApp()
   const ui = useUI()
   const [open, setOpen] = useState(false)
-  const ref = useDismiss(open, () => setOpen(false))
+  const btn = useRef<HTMLButtonElement>(null)
+  const closeMenu = useCallback(() => setOpen(false), [])
   const board = state.boards.find((b) => b.id === state.boardId)!
   return (
-    <div className="menuwrap boardmenu" ref={ref}>
-      <button className="boardname" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(!open)}>
+    <div className="menuwrap boardmenu">
+      <button ref={btn} className="boardname" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(!open)}>
         <span>{board.name}</span>
         <Icon name="ChevronDown" size={18} />
       </button>
       {open && (
-        <div className="menu left" role="menu">
+        <Popover anchor={btn} onClose={closeMenu} align="left">
           {state.boards.map((b) => (
             <button role="menuitem" key={b.id} onClick={() => (dispatch({ t: 'setBoard', id: b.id }), scrollTo(0, 0), setOpen(false))}>
               {b.id === state.boardId ? <Icon name="Check" /> : <span className="gap" />} {b.name}
@@ -343,7 +341,7 @@ function BoardMenu({ onNew }: { onNew: () => void }) {
               }
             }}><Icon name="Trash" /> Delete board</button>
           )}
-        </div>
+        </Popover>
       )}
     </div>
   )
@@ -487,12 +485,29 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
     [dispatch],
   )
 
+  // how many columns actually fit this screen: the control never offers more
+  const [fit, setFit] = useState(8)
+  useEffect(() => {
+    const el = boardRef.current
+    if (!el) return
+    const measure = () => {
+      const cs = getComputedStyle(el)
+      const gap = parseFloat(cs.columnGap) || 0
+      const room = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight)
+      setFit(Math.max(1, Math.min(8, Math.floor((room + gap) / (150 + gap)))))
+    }
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [])
+  const cols = Math.min(state.cols, fit)
   const g = useGoogle()
   const lapsed = g.stale[0] // Google sessions last about an hour; one tap renews
   const space = state.spaces.find((s) => s.id === filter)
   const onBoard = useMemo(() => state.cards.filter((c) => c.boardId === state.boardId), [state.cards, state.boardId])
   const cards = useMemo(() => (space ? onBoard.filter((c) => c.spaceId === space.id) : onBoard), [onBoard, space])
-  useFlip(boardRef, cards.map((c) => c.id).join() + state.cols)
+  useFlip(boardRef, cards.map((c) => c.id).join() + cols)
 
   const add = useCallback(
     (type: string, data?: Record<string, any>) => {
@@ -545,13 +560,13 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
   }, [add, ui])
 
   const commands = useMemo<Command[]>(
-    () => [
+    () => ([
       { name: 'New card', icon: 'Plus', hint: 'N', run: () => setOverlay('picker') },
       { name: 'New board', icon: 'LayoutGrid', run: () => setOverlay('newboard') },
       ...(canUndo ? [{ name: 'Undo', icon: 'Undo2', hint: '⌘Z', run: () => dispatch({ t: 'undo' }) } as Command] : []),
       ...(canRedo ? [{ name: 'Redo', icon: 'Redo2', hint: '⇧⌘Z', run: () => dispatch({ t: 'redo' }) } as Command] : []),
       { name: 'Settings', icon: 'Settings', run: () => setOverlay('settings') },
-    ],
+    ] as Command[]).map((c) => (matchMedia('(hover: hover)').matches ? c : { ...c, hint: undefined })),
     [canUndo, canRedo, dispatch],
   )
   const ctx = useMemo(() => ({ state, dispatch, openSettings: () => setOverlay('settings'), jumpTo }), [state, dispatch, jumpTo])
@@ -577,9 +592,9 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
               <Icon name="Search" size={18} />
             </button>
             <div className="zoom" role="group" aria-label="Columns">
-              <button className="ghost" aria-label="Fewer columns" disabled={state.cols <= 1} onClick={() => dispatch({ t: 'setCols', cols: state.cols - 1 })}><Icon name="Minus" /></button>
-              <b aria-live="polite">{state.cols}</b>
-              <button className="ghost" aria-label="More columns" disabled={state.cols >= 8} onClick={() => dispatch({ t: 'setCols', cols: state.cols + 1 })}><Icon name="Plus" /></button>
+              <button className="ghost" aria-label="Fewer columns" disabled={cols <= 1} onClick={() => dispatch({ t: 'setCols', cols: cols - 1 })}><Icon name="Minus" /></button>
+              <b aria-live="polite">{cols}</b>
+              <button className="ghost" aria-label="More columns" disabled={cols >= fit} onClick={() => dispatch({ t: 'setCols', cols: cols + 1 })}><Icon name="Plus" /></button>
             </div>
             <button className="ghost" aria-label="Settings" onClick={() => setOverlay('settings')}><Icon name="Settings" size={18} /></button>
           </div>
@@ -611,7 +626,7 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
         </nav>
       </div>
 
-      <main className="board" ref={boardRef} style={{ columns: `150px ${state.cols}` }}>
+      <main className="board" ref={boardRef} style={{ columns: `150px ${cols}` }}>
         {cards.map((c, i) => (
           <CardView key={c.id} card={c} index={i} spaces={state.spaces} onOpen={onOpen} onDelete={onDelete} startDrag={startDrag} day={day} />
         ))}
@@ -631,7 +646,7 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
       {overlay === 'settings' && <Settings onClose={close} />}
       {overlay === 'newboard' && <NewBoard onClose={close} />}
       {overlay === 'palette' && <Palette cards={onBoard} commands={commands} onClose={closePalette} onJump={jumpTo} onNew={add} onCapture={capture} />}
-      {opened && <CardSheet card={opened} space={state.spaces.find((s) => s.id === opened.spaceId)} onClose={closeCard} />}
+      {opened && <CardSheet card={opened} space={state.spaces.find((s) => s.id === opened.spaceId)} onClose={closeCard} onDelete={onDelete} />}
     </Ctx.Provider>
   )
 }

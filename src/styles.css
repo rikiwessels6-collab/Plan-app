@@ -71,7 +71,7 @@ kbd:first-child { margin-left: 0; }
 /* ---------- top bar ---------- */
 .top {
   position: sticky; top: 0; z-index: 20;
-  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  background: color-mix(in srgb, var(--bg) 90%, transparent);
   backdrop-filter: saturate(1.6) blur(16px); -webkit-backdrop-filter: saturate(1.6) blur(16px);
   padding: calc(14px + env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) 10px max(20px, env(safe-area-inset-left));
   border-bottom: 1px solid transparent; transition: border-color 0.25s, box-shadow 0.25s;
@@ -133,7 +133,7 @@ kbd:first-child { margin-left: 0; }
 @keyframes drop { from { opacity: 0; transform: translateY(-6px); } }
 
 /* ---------- board and cards ---------- */
-.board { position: relative; padding: 10px 20px calc(120px + env(safe-area-inset-bottom)); column-gap: 14px; }
+.board { position: relative; overflow-x: clip; padding: 10px 20px calc(120px + env(safe-area-inset-bottom)); column-gap: 14px; }
 .card {
   break-inside: avoid; margin: 0 0 14px; background: var(--card); border-radius: 18px; padding: 14px 14px 12px;
   box-shadow: var(--shadow-1); position: relative;
@@ -172,7 +172,6 @@ button.badge:active { transform: scale(0.92); }
 .card:hover > header .ghost, .card > header .ghost[aria-expanded='true'] { opacity: 1; }
 
 .card.bare { padding: 0; overflow: hidden; }
-.card.bare.menu-open { overflow: visible; }
 .card.bare > header { position: absolute; inset: 8px 8px auto 8px; z-index: 2; height: 32px; }
 .card.bare > header .badge, .card.bare > header .title { opacity: 0; pointer-events: none; }
 .card.bare > header .ghost {
@@ -284,7 +283,7 @@ input[type='date'], input[type='time'] { font-variant-numeric: tabular-nums; }
 .inline:focus { border-bottom: 1px solid var(--ink); }
 .bar { height: 6px; border-radius: 3px; background: var(--fill); margin: 10px 0 8px; overflow: hidden; }
 .bar i { display: block; height: 100%; background: var(--accent); border-radius: 3px; transition: width 0.6s var(--ease), background-color 0.3s; }
-.bar i.over { background: var(--danger); }
+.bar i.exceeded { background: var(--danger); }
 .count { text-align: center; padding: 4px 0 2px; }
 .count input { width: auto; margin-top: 10px; font-size: 13px; background: var(--fill); border-radius: 10px; padding: 7px 10px; }
 .number { text-align: center; }
@@ -689,6 +688,94 @@ input[type='date'], input[type='time'] { font-variant-numeric: tabular-nums; }
 .broken { display: grid; gap: 8px; justify-items: start; margin-top: 10px; }
 .sheet:focus { outline: none; }
 
+
+/* ---------- menus drawn above the page ---------- */
+.menu.floating { position: fixed; right: auto; top: 0; left: 0; z-index: 85; max-height: calc(100dvh - 16px); overflow-y: auto; }
+.menu-scrim { z-index: 84; animation: fade 0.2s; }
+.menu.as-sheet {
+  position: fixed; left: 0; right: 0; top: auto; bottom: 0; z-index: 85; min-width: 0; border-radius: 24px 24px 0 0;
+  padding: 22px 12px calc(14px + env(safe-area-inset-bottom)); animation: sheet-in 0.3s var(--ease); transform-origin: bottom;
+  max-height: 80dvh; overflow-y: auto;
+}
+.menu.as-sheet > button { height: 50px; font-size: 16px; gap: 14px; padding: 0 12px; }
+.menu.as-sheet .spacepick { gap: 14px; padding: 10px 12px; }
+.menu.as-sheet .spacepick button { width: 32px; height: 32px; }
+.spacepick button { position: relative; }
+.spacepick button::after { content: ''; position: absolute; inset: -6px; }
+
+/* ---------- fields that wrap, date chips, faces ---------- */
+.grow.title { flex: 1; min-width: 0; }
+.grow.title textarea { cursor: text; user-select: text; -webkit-user-select: text; }
+.row .grow.sub { font-size: 12px; line-height: 16px; color: var(--mute); }
+.row.person > div { display: grid; }
+.datechip {
+  position: relative; display: inline-flex; align-items: center; gap: 5px; height: 26px; padding: 0 9px; border-radius: 999px;
+  background: var(--fill); font-size: 12px; font-weight: 500; color: var(--ink-2); cursor: pointer; white-space: nowrap; max-width: 100%;
+  transition: background-color 0.15s;
+}
+.datechip:hover { background: var(--fill-2); }
+.datechip.unset { color: var(--mute); background: none; box-shadow: inset 0 0 0 1px var(--line); }
+.datechip input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: pointer; }
+.datechip:focus-within { outline: 2px solid var(--accent); outline-offset: 2px; }
+.row.dated { gap: 6px 8px; padding-bottom: 8px; }
+.row.dated .grow { flex: 1 1 100%; }
+.row.dated em { margin-left: auto; }
+.count .datechip { margin-top: 10px; }
+.dots .dow { font-size: 10px; font-weight: 600; color: var(--mute); text-align: center; padding-bottom: 2px; }
+.faces { display: grid; grid-template-columns: repeat(5, 1fr); gap: 4px; }
+.faces button { aspect-ratio: 1; max-height: 48px; width: 100%; border-radius: 12px; display: grid; place-items: center; color: var(--mute); background: var(--fill); transition: background-color 0.2s, color 0.2s, transform 0.25s var(--spring); }
+.faces button:active { transform: scale(0.9); }
+.faces button[aria-checked='true'] { color: #fff; transform: scale(1.06); }
+.faces [data-m='1'][aria-checked='true'] { background: #7a6f9b; }
+.faces [data-m='2'][aria-checked='true'] { background: #7f96ad; }
+.faces [data-m='3'][aria-checked='true'] { background: #a79f82; }
+.faces [data-m='4'][aria-checked='true'] { background: #e08e42; }
+.faces [data-m='5'][aria-checked='true'] { background: var(--accent); }
+.facelabel { text-align: center; margin-top: 8px; font-weight: 500; }
+.inline.unit { text-align: left; }
+
+/* ---------- nothing may be wider than its card ---------- */
+.pin { min-width: 0; max-width: 100%; }
+.pin b, .pin small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.card .btn, .opened .btn { max-width: 100%; white-space: normal; height: auto; min-height: 36px; padding-top: 7px; padding-bottom: 7px; text-align: center; line-height: 1.25; }
+.card .bring { min-height: 32px; }
+.card input[type='date'], .card input[type='time'] { max-width: 100%; }
+.row .num { max-width: 60%; }
+.palette-list b { flex: 0 1 auto; min-width: 0; }
+.palette-list small { flex: 0 0 auto; max-width: 55%; }
+
+/* ---------- comfortable touch targets ---------- */
+.ghost { position: relative; }
+.ghost::after { content: ''; position: absolute; inset: -5px; }
+.card > header .ghost::after, .gbar .ghost::after, .monthnav .ghost::after, .ghost.mini::after { inset: -8px; }
+.badge { position: relative; }
+button.badge::after { content: ''; position: absolute; inset: -9px; }
+.dot, .cal button { position: relative; }
+.dot::before, .cal button::before { content: ''; position: absolute; inset: -3px; }
+.pips button::after { inset: -10px -3px; }
+.swatches button { width: 22px; height: 22px; }
+.swatches button::after { inset: -9px -4px; }
+.toast button { height: 36px; padding: 0 16px; }
+
+/* ---------- sheets ---------- */
+.sheet.tall { height: 88dvh; }
+.sheet-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 26px; padding-top: 16px; border-top: 1px solid var(--line); }
+.btn.soft.danger { background: var(--fill); color: var(--danger); }
+.opened .spacename { margin: 0 0 4px; }
+.starts button { align-content: start; }
+.brand img, .welcome img { box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.1), 0 4px 12px -4px rgba(0, 0, 0, 0.35); }
+.toasts { padding: 0 16px; }
+@media (min-width: 640px) { .sheet.tall { height: min(84dvh, 780px); } }
+@media (max-width: 520px) {
+  .toasts { padding-right: 92px; }
+  .sheet.wide { min-height: 62dvh; }
+}
+@media (hover: none) {
+  .keys-only { display: none; }
+  /* on touch, removing a photo lives in the opened card, not as a button sitting on the picture */
+  .card .over { display: none; }
+}
+
 /* ---------- small screens and touch ---------- */
 @media (min-width: 640px) {
   .scrim { align-items: center; padding: 24px; }
@@ -710,6 +797,8 @@ input[type='date'], input[type='time'] { font-variant-numeric: tabular-nums; }
 }
 /* iOS zooms the page when a focused field is under 16px */
 @media (hover: none) and (pointer: coarse) {
+  .grow.title { font-size: 17px; }
+  .row .grow.sub { font-size: 16px; line-height: 20px; }
   .row input, .row .grow, .text, .caption, .inline, .count input, .evform input, .evform select, .card .field input, .opened .field input { font-size: 16px; }
   .row .sub { font-size: 16px; line-height: 20px; }
   .title { font-size: 17px; }
@@ -718,4 +807,12 @@ input[type='date'], input[type='time'] { font-variant-numeric: tabular-nums; }
 }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0s !important; transition-duration: 0.01ms !important; }
+}
+
+/* The build tool keeps only the -webkit- form of backdrop-filter above; browsers other than Safari need the standard one. */
+@supports (backdrop-filter: blur(1px)) {
+  .top { backdrop-filter: saturate(1.6) blur(16px); }
+  .scrim { backdrop-filter: blur(3px); }
+  .dropzone { backdrop-filter: blur(6px); }
+  .over, .card.bare > header .ghost { backdrop-filter: blur(8px); }
 }

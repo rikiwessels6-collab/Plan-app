@@ -1,5 +1,6 @@
 // Shared interface pieces: sheets, dialogs and toasts.
-import { Component, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from './sections'
 
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -16,13 +17,71 @@ export function trap(panel: HTMLElement, e: KeyboardEvent | React.KeyboardEvent)
   else if (!e.shiftKey && cur === last) (e.preventDefault(), first.focus())
 }
 
+/**
+ * A menu attached to a button. It is drawn above everything else and kept inside the screen
+ * (flipping above the button when there is no room below); on phones it is a bottom sheet.
+ */
+export function Popover({ anchor, onClose, children, align = 'right' }: {
+  anchor: RefObject<HTMLElement | null>
+  onClose: () => void
+  children: ReactNode
+  align?: 'left' | 'right'
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  const phone = matchMedia('(max-width: 520px)').matches
+  const [pos, setPos] = useState<CSSProperties>(phone ? {} : { visibility: 'hidden' })
+  useLayoutEffect(() => {
+    if (phone || !anchor.current || !ref.current) return
+    const a = anchor.current.getBoundingClientRect(), m = ref.current.getBoundingClientRect()
+    const left = Math.max(8, Math.min(align === 'right' ? a.right - m.width + 4 : a.left - 4, innerWidth - m.width - 8))
+    const below = a.bottom + 6
+    const up = below + m.height > innerHeight - 8 && a.top - m.height - 6 > 8
+    setPos({ left, top: up ? a.top - m.height - 6 : Math.min(below, Math.max(8, innerHeight - m.height - 8)), transformOrigin: `${align} ${up ? 'bottom' : 'top'}` })
+  }, [phone, anchor, align])
+  useEffect(() => {
+    const down = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && !anchor.current?.contains(e.target as Node) && onClose()
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') (e.stopPropagation(), onClose(), anchor.current?.focus())
+      if (e.key === 'Tab' && ref.current) trap(ref.current, e)
+      if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && ref.current) {
+        e.preventDefault()
+        const items = [...ref.current.querySelectorAll<HTMLElement>('button')]
+        const i = items.indexOf(document.activeElement as HTMLElement)
+        items[(i + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length]?.focus()
+      }
+    }
+    const away = () => !phone && onClose()
+    document.addEventListener('pointerdown', down)
+    document.addEventListener('keydown', key, true)
+    addEventListener('scroll', away, { passive: true })
+    addEventListener('resize', onClose)
+    return () => {
+      document.removeEventListener('pointerdown', down)
+      document.removeEventListener('keydown', key, true)
+      removeEventListener('scroll', away)
+      removeEventListener('resize', onClose)
+    }
+  }, [onClose, anchor, phone])
+  return createPortal(
+    <>
+      {phone && <div className="scrim menu-scrim" />}
+      <div ref={ref} className={`menu ${phone ? 'as-sheet' : 'floating'}`} role="menu" style={pos}>
+        {phone && <i className="grabber" aria-hidden />}
+        {children}
+      </div>
+    </>,
+    document.body,
+  )
+}
+
 /** Bottom sheet on phones (swipe down to close), centred panel on larger screens. */
-export function Sheet({ title, onClose, children, wide, head }: {
+export function Sheet({ title, onClose, children, wide, head, tall }: {
   title: string
   onClose: () => void
   children: ReactNode | ((close: () => void) => ReactNode)
   wide?: boolean
   head?: ReactNode
+  tall?: boolean
 }) {
   const [closing, setClosing] = useState(false)
   const panel = useRef<HTMLDivElement>(null)
@@ -40,7 +99,7 @@ export function Sheet({ title, onClose, children, wide, head }: {
     if (!panel.current?.contains(document.activeElement)) panel.current?.focus({ preventScroll: true })
     const key = (e: KeyboardEvent) => {
       // a dialog or photo on top of this sheet handles its own keys
-      if (document.querySelector('.scrim.mid, .lightbox')) return
+      if (document.querySelector('.scrim.mid, .lightbox, .menu')) return
       if (e.key === 'Escape') close()
       if (e.key === 'Tab' && panel.current) trap(panel.current, e)
     }
@@ -81,7 +140,7 @@ export function Sheet({ title, onClose, children, wide, head }: {
 
   return (
     <div className={`scrim${closing ? ' out' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && close()}>
-      <div className={`sheet${wide ? ' wide' : ''}`} ref={panel} tabIndex={-1} role="dialog" aria-modal aria-label={title}>
+      <div className={`sheet${wide ? ' wide' : ''}${tall ? ' tall' : ''}`} ref={panel} tabIndex={-1} role="dialog" aria-modal aria-label={title}>
         <header onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
           <i className="grabber" aria-hidden />
           {head ?? <h2>{title}</h2>}

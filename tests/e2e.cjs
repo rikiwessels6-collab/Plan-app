@@ -12,7 +12,7 @@ const check = (name, ok, detail = '') => {
   if (!ok) failed++
   console.log(`${ok ? '  ok  ' : ' FAIL '} ${name}${ok || !detail ? '' : `  →  ${detail}`}`)
 }
-const titles = (p) => p.locator('[data-card] > header .title').evaluateAll((els) => els.map((e) => e.value))
+const titles = (p) => p.locator('[data-card] > header .title textarea').evaluateAll((els) => els.map((e) => e.value))
 const shot = async (p, name) => SHOTS && (await p.waitForTimeout(600), await p.screenshot({ path: path.join(SHOTS, name + '.png') }))
 
 async function start(browser, opts = {}) {
@@ -192,7 +192,7 @@ async function device(browser) {
     name: 'c.vcf', mimeType: 'text/vcard',
     buffer: Buffer.from('BEGIN:VCARD\r\nVERSION:3.0\r\nN:Lee;Sam;;;\r\nFN:Sam Lee\r\nTEL;type=CELL:+44 7700 900123\r\nEMAIL:sam@example.com\r\nEND:VCARD\r\nBEGIN:VCARD\r\nVERSION:3.0\r\nN:Okafor;Ada\r\nitem1.TEL:020 7946 0000\r\nEND:VCARD\r\n'),
   })
-  const people = await page.locator('.t-contacts .person').evaluateAll((els) => els.map((e) => [...e.querySelectorAll('input')].map((i) => i.value).join(' / ')).filter((s) => s !== ' / '))
+  const people = await page.locator('.t-contacts .person').evaluateAll((els) => els.map((e) => [...e.querySelectorAll('textarea')].map((i) => i.value).join(' / ')).filter((s) => s !== ' / '))
   check('imports contact cards', people.join(' ; ') === 'Sam Lee / +44 7700 900123 · sam@example.com ; Ada Okafor / 020 7946 0000', people.join(' ; '))
 
   await addCard(page, 'Birthdays')
@@ -242,6 +242,14 @@ async function device(browser) {
   })
   await page.waitForSelector('.t-photo .photo img')
   check('dropping a photo adds a photo card', (await titles(page))[0] === 'Photo')
+  // an over-budget card must stay readable, and nothing may be wider than the screen
+  await addCard(page, 'Budget')
+  await page.locator('.t-budget .inline').fill('100')
+  await page.locator('.t-budget [data-row]').first().fill('Rent')
+  await page.locator('.t-budget .num').first().fill('1234567.8')
+  const bar = await page.locator('.t-budget .bar i').boundingBox()
+  check('over-budget bar stays a thin bar', bar.height < 10, JSON.stringify(bar))
+  check('long amounts are not clipped', await page.locator('.t-budget .num').first().evaluate((e) => e.scrollWidth <= e.clientWidth + 1))
   check('no errors', errors.length === 0, errors.join('; '))
   await ctx.close()
 }
@@ -369,6 +377,17 @@ async function phone(browser) {
   await tp('touchEnd')
   await page.waitForTimeout(500)
   check('press, hold and drag reorders', before[0] !== (await titles(page))[0])
+  // the card menu is a bottom sheet on phones, fully on screen
+  await page.locator('[data-card]').first().locator('[aria-label="Card options"]').tap()
+  await page.waitForTimeout(400)
+  const m = await page.locator('.menu').boundingBox()
+  check('card menu is fully on screen', m.x >= 0 && m.x + m.width <= 390 && m.y + m.height <= 844.5, JSON.stringify(m))
+  check('menu does not widen the page', (await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)) === 0)
+  await shot(page, 'menu-phone')
+  await page.locator('.menu-scrim').tap({ position: { x: 20, y: 20 } })
+  await page.waitForTimeout(200)
+  check('tapping outside closes the menu', (await page.locator('.menu').count()) === 0)
+  check('column control shows what fits', (await page.locator('.zoom b').innerText()) === '2' && (await page.locator('[aria-label="More columns"]').isDisabled()))
   await page.tap('[aria-label="Search and capture"]')
   await page.waitForSelector('.palette')
   await shot(page, 'palette-phone')

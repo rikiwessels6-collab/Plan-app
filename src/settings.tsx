@@ -116,13 +116,13 @@ export function Settings({ onClose }: { onClose: () => void }) {
           </button>
         ) : (
           <p className="hint">
-            Gmail, Calendar and sync need a Google client ID: a free, one-time setup described in the README. Paste it
-            below. It stays on this device.
+            Gmail, Calendar and sync need a one-time Google setup (free, about five minutes). It gives you a
+            “client ID” to paste below; it stays on this device.
           </p>
         )}
         <div className="field">
           <input
-            value={id} placeholder="Client ID ending .apps.googleusercontent.com" aria-label="Google client ID"
+            value={id} placeholder="Paste client ID" aria-label="Google client ID"
             autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => setId(e.target.value)}
           />
           <button className="btn soft" disabled={id.trim() === g.clientId} onClick={() => (setClientId(id), ui.toast('Client ID saved'))}>Save</button>
@@ -161,8 +161,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
           <input ref={file} type="file" accept="application/json" hidden onChange={(e) => importAll(e.target.files?.[0])} />
         </div>
 
-        <h3>Shortcuts</h3>
-        <p className="hint keys"><kbd>/</kbd> search and capture <kbd>N</kbd> new card <kbd>⌘Z</kbd> undo <kbd>Esc</kbd> close</p>
+        <h3 className="keys-only">Shortcuts</h3>
+        <p className="hint keys keys-only"><kbd>/</kbd> search and capture <kbd>N</kbd> new card <kbd>⌘Z</kbd> undo <kbd>Esc</kbd> close</p>
       </div>
     </Sheet>
   )
