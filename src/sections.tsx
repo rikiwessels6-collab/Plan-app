@@ -17,6 +17,14 @@ const iso = (d: Date) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const day = (s: string) => new Date(`${s}T00:00:00`)
 const daysUntil = (s: string) => Math.round((day(s).getTime() - day(iso(new Date())).getTime()) / 86400000)
+/** For birthdays and anniversaries: the next time this day of the year comes round (today counts). */
+export const nextYearly = (s: string, from = new Date()) => {
+  const [, m, d] = s.split('-').map(Number)
+  const start = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  let n = new Date(start.getFullYear(), m - 1, d)
+  if (n < start) n = new Date(start.getFullYear() + 1, m - 1, d)
+  return iso(n)
+}
 const money = (n: number) => n.toLocaleString(undefined, { maximumFractionDigits: 2 })
 
 /** Rows that always end in one empty row; Enter and Backspace move between rows. */
@@ -55,7 +63,7 @@ function Checklist({ value, onChange, rows: min = 3, placeholder }: P<Item[]> & 
     if (lines.length < 2) return
     e.preventDefault()
     const items = lines.map((l) => {
-      const m = l.match(/^(?:[-*•]\s*)?(?:\[( |x|X)\]\s*)?(?:\d+[.)]\s+)?(.*)$/)!
+      const m = l.match(/^(?:[-*•]\s*)?(?:\[( |x|X)\]\s*)?(?:\d{1,2}[.)]\s+)?(.*)$/)!
       return { text: m[2] || l, done: !!m[1]?.trim() }
     })
     const cur = (value ?? []).slice()
@@ -108,7 +116,14 @@ export async function shrink(file: File): Promise<string> {
 function Photo({ value, onChange }: P<{ src?: string; caption?: string }>) {
   const ui = useUI()
   const v = value ?? {}
-  const pick = async (f?: File) => f && onChange({ ...v, src: await shrink(f) })
+  const pick = async (f?: File) => {
+    if (!f) return
+    try {
+      onChange({ ...v, src: await shrink(f) })
+    } catch {
+      ui.toast('That photo could not be read. Try a JPEG or PNG.')
+    }
+  }
   if (!v.src)
     return (
       <label className="drop">
@@ -138,7 +153,10 @@ function Photos({ value, onChange }: P<string[]>) {
   const v = value ?? []
   const add = async (files: FileList | null) => {
     if (!files) return
-    onChange([...v, ...(await Promise.all([...files].map(shrink)))])
+    const got = await Promise.allSettled([...files].map(shrink))
+    const ok = got.flatMap((r) => (r.status === 'fulfilled' ? [r.value] : []))
+    if (ok.length < got.length) ui.toast(ok.length ? 'Some photos could not be read' : 'That photo could not be read. Try a JPEG or PNG.')
+    if (ok.length) onChange([...v, ...ok])
   }
   return (
     <div className="grid">
@@ -259,19 +277,20 @@ function Slots({ value, onChange, labels }: P<Record<string, string>> & { labels
 }
 
 interface DateRow { label: string; date: string }
-function Dates({ value, onChange }: P<DateRow[]>) {
+function Dates({ value, onChange, yearly }: P<DateRow[]> & { yearly?: boolean }) {
   const { rows, ref, set, onKey } = useRows<DateRow>(value, (r) => !r.label && !r.date, () => ({ label: '', date: '' }), 2, onChange)
   return (
     <div className="rows" ref={ref}>
       {rows.map((r, i) => {
-        const n = r.date ? daysUntil(r.date) : null
+        const when = r.date && yearly ? nextYearly(r.date) : r.date
+        const n = when ? daysUntil(when) : null
         return (
           <div className="row dated" key={i}>
             <input data-row value={r.label} placeholder={i === 0 ? 'What' : undefined} onChange={(e) => set(i, { label: e.target.value })} onKeyDown={onKey(i)} />
             <input type="date" aria-label="Date" value={r.date} onChange={(e) => set(i, { date: e.target.value })} />
             {n !== null && <em className={n < 0 ? 'past' : ''}>{n === 0 ? 'today' : n > 0 ? `in ${n}d` : `${-n}d ago`}</em>}
             {r.date && (
-              <button className="ghost mini" aria-label="Add to calendar" title="Add to calendar" onClick={() => addToCalendar(r.label, r.date)}>
+              <button className="ghost mini" aria-label="Add to calendar" title="Add to calendar" onClick={() => addToCalendar(r.label, when)}>
                 <Icon name="CalendarPlus" size={14} />
               </button>
             )}
@@ -298,6 +317,13 @@ function Countdown({ value, onChange, title }: P<string> & { title: string }) {
   )
 }
 
+const readable = (path: string) => {
+  try {
+    return decodeURIComponent(path)
+  } catch {
+    return path // a stray "%" is not valid encoding; show it as typed
+  }
+}
 function LinkBox({ value, onChange }: P<string>) {
   let url: URL | null = null
   try {
@@ -310,7 +336,7 @@ function LinkBox({ value, onChange }: P<string>) {
           <Icon name="Link" />
           <span>
             <b>{url.hostname.replace(/^www\./, '')}</b>
-            {url.pathname.length > 1 && <small>{decodeURIComponent(url.pathname).slice(0, 60)}</small>}
+            {url.pathname.length > 1 && <small>{readable(url.pathname).slice(0, 60)}</small>}
           </span>
           <Icon name="ExternalLink" size={14} />
         </a>
@@ -478,7 +504,7 @@ export function SectionView({ s, value, onChange, title = '' }: { s: Section; ti
       case 'amounts': return <Amounts value={value} onChange={onChange} budget={s.budget} />
       case 'fields': return <Fields value={value} onChange={onChange} fields={s.fields} />
       case 'slots': return <Slots value={value} onChange={onChange} labels={s.labels} />
-      case 'dates': return <Dates value={value} onChange={onChange} />
+      case 'dates': return <Dates value={value} onChange={onChange} yearly={s.yearly} />
       case 'countdown': return <Countdown value={value} onChange={onChange} title={title} />
       case 'link': return <LinkBox value={value} onChange={onChange} />
       case 'number': return <NumberBox value={value} onChange={onChange} />

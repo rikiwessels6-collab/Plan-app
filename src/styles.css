@@ -685,6 +685,10 @@ input[type='date'], input[type='time'] { font-variant-numeric: tabular-nums; }
   .card { box-shadow: none; border: 1px solid #ddd; animation: none; }
 }
 
+.chips button.alert { background: color-mix(in srgb, var(--accent) 14%, var(--card)); color: var(--accent); box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 40%, transparent); font-weight: 600; }
+.broken { display: grid; gap: 8px; justify-items: start; margin-top: 10px; }
+.sheet:focus { outline: none; }
+
 /* ---------- small screens and touch ---------- */
 @media (min-width: 640px) {
   .scrim { align-items: center; padding: 24px; }

@@ -34,7 +34,7 @@ export const CATALOG: CardType[] = [
   { id: 'month', name: 'Month', group: 'Time', icon: 'CalendarDays', sections: [{ kind: 'month', key: 'month' }] },
   { id: 'habit', name: 'Habit', group: 'Time', icon: 'Repeat', sections: [{ kind: 'habit', key: 'habit' }] },
   { id: 'countdown', name: 'Countdown', group: 'Time', icon: 'Timer', sections: [{ kind: 'countdown', key: 'cd' }] },
-  { id: 'dates', name: 'Birthdays', group: 'Time', icon: 'Cake', sections: [{ kind: 'dates', key: 'dates' }] },
+  { id: 'dates', name: 'Birthdays', group: 'Time', icon: 'Cake', sections: [{ kind: 'dates', key: 'dates', yearly: true }] },
   { id: 'event', name: 'Event', group: 'Time', icon: 'PartyPopper', sections: [
     { kind: 'fields', key: 'f', fields: ['When', 'Where', 'Who'] }, list('prep', 'To prepare', 3)] },
   { id: 'review', name: 'Weekly review', group: 'Time', icon: 'Star', sections: [

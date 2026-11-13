@@ -99,9 +99,11 @@ function NewEvent({ accounts }: { accounts: Account[] }) {
     `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`,
   )
   const [at, setAt] = useState('')
-  const [acc, setAcc] = useState(accounts[0].email)
+  const [chosen, setAcc] = useState(accounts[0]?.email)
+  const acc = accounts.some((a) => a.email === chosen) ? chosen : accounts[0]?.email // the chosen account may have signed out since
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  if (!acc) return null
   if (!open)
     return (
       <button className="btn soft add-ev" onClick={() => setOpen(true)}>

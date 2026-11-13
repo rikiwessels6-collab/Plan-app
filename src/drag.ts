@@ -12,7 +12,11 @@ export function useCardDrag(dispatch: (a: Action) => void) {
   return useCallback(
     (e: RPointerEvent<HTMLElement>, id: string) => {
       if (e.button !== 0) return
-      if ((e.target as HTMLElement).closest('button, a, .menu')) return
+      const on = e.target as HTMLElement
+      if (on.closest('button, a, .menu')) return
+      // a title that is being edited is for selecting text, not for moving the card
+      if (on.matches('input, textarea') && document.activeElement === on) return
+      const pointer = e.pointerId
       const src = e.currentTarget.closest<HTMLElement>('[data-card]')
       if (!src) return
       const touch = e.pointerType !== 'mouse'
@@ -72,6 +76,7 @@ export function useCardDrag(dispatch: (a: Action) => void) {
       const hold = touch ? window.setTimeout(activate, 320) : 0
 
       const move = (ev: PointerEvent) => {
+        if (ev.pointerId !== pointer) return
         x = ev.clientX
         y = ev.clientY
         if (!active) {
@@ -86,12 +91,14 @@ export function useCardDrag(dispatch: (a: Action) => void) {
       const noScroll = (ev: TouchEvent) => active && ev.preventDefault()
       const noMenu = (ev: Event) => ev.preventDefault()
 
-      const end = () => {
+      const end = (ev?: Event) => {
+        if (ev instanceof PointerEvent && ev.pointerId !== pointer) return // a second finger is not the end of the drag
         clearTimeout(hold)
         cancelAnimationFrame(raf)
         removeEventListener('pointermove', move)
         removeEventListener('pointerup', end)
         removeEventListener('pointercancel', end)
+        removeEventListener('blur', end)
         document.removeEventListener('touchmove', noScroll)
         src.removeEventListener('contextmenu', noMenu)
         if (!active || !clone) return
@@ -110,6 +117,7 @@ export function useCardDrag(dispatch: (a: Action) => void) {
       addEventListener('pointermove', move)
       addEventListener('pointerup', end)
       addEventListener('pointercancel', end)
+      addEventListener('blur', end) // the button was released outside the window
       document.addEventListener('touchmove', noScroll, { passive: false })
       src.addEventListener('contextmenu', noMenu)
     },

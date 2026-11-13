@@ -42,7 +42,22 @@ function commit() {
   sessionStorage.setItem(K_TOK, JSON.stringify(toks))
   version++
   subs.forEach((f) => f())
+  watchExpiry()
 }
+
+// sessions end on a timer, not on an event: tell the screen when the next one runs out
+let expiry = 0
+function watchExpiry() {
+  clearTimeout(expiry)
+  const next = Math.min(...accounts.filter((a) => a.token && (a.exp ?? 0) > Date.now()).map((a) => a.exp!))
+  if (Number.isFinite(next))
+    expiry = window.setTimeout(() => {
+      version++
+      subs.forEach((f) => f())
+      watchExpiry()
+    }, Math.min(next - Date.now() + 500, 2 ** 31 - 1))
+}
+if (typeof window !== 'undefined') setTimeout(watchExpiry)
 
 export const getClientId = (): string =>
   localStorage.getItem(K_ID) || (import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined) || ''
@@ -88,14 +103,16 @@ async function requestToken(hint?: string): Promise<{ token: string; exp: number
   })
 }
 
+async function whoIs(token: string): Promise<string> {
+  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', { headers: { Authorization: `Bearer ${token}` } })
+  if (!r.ok) throw new Error(await errText(r))
+  return (await r.json()).emailAddress
+}
+
 /** Add a Google account (opens Google's account chooser). */
 export async function connect(): Promise<void> {
   const t = await requestToken()
-  const r = await fetch('https://gmail.googleapis.com/gmail/v1/users/me/profile', {
-    headers: { Authorization: `Bearer ${t.token}` },
-  })
-  if (!r.ok) throw new Error(await errText(r))
-  const email: string = (await r.json()).emailAddress
+  const email = await whoIs(t.token)
   accounts = [...accounts.filter((a) => a.email !== email), { email, ...t }]
   commit()
 }
@@ -103,6 +120,9 @@ export async function connect(): Promise<void> {
 /** Renew an expired session for an account already added. Call from a tap. */
 export async function reconnect(email: string): Promise<void> {
   const t = await requestToken(email)
+  // the hint is only a suggestion: make sure Google did not hand back a different account
+  const who = await whoIs(t.token)
+  if (who !== email) throw new Error(`That signed in as ${who}. Choose ${email} to reconnect it.`)
   accounts = accounts.map((a) => (a.email === email ? { email, ...t } : a))
   commit()
 }
@@ -136,7 +156,8 @@ async function gfetch(a: Account, url: string, init?: RequestInit): Promise<any>
     throw new Error('expired')
   }
   if (!r.ok) throw new Error(await errText(r))
-  return r.json()
+  const body = await r.text()
+  return body ? JSON.parse(body) : null
 }
 
 /** Call a Google API as one of the connected accounts. */
@@ -212,7 +233,7 @@ async function calendars(a: Account): Promise<{ id: string; color?: string }[]> 
     if (e?.message === 'expired') throw e
     // connected before this permission existed: the main calendar still works
   }
-  calCache.set(a.email, { at: Date.now(), list })
+  if (list[0].id !== 'primary') calCache.set(a.email, { at: Date.now(), list }) // a failed lookup is retried next time
   return list
 }
 
@@ -237,9 +258,11 @@ async function events(a: Account, days: number): Promise<Ev[]> {
       ),
     ),
   )
+  const once = new Set<string>()
   return per
     .flat()
-    .filter(({ e }) => e.status !== 'cancelled' && e.start)
+    // the same event can sit on two of someone's calendars
+    .filter(({ e }) => e.status !== 'cancelled' && e.start && !once.has(e.id) && !!once.add(e.id))
     .map(({ e, color }) => ({
       id: e.id,
       account: a.email,

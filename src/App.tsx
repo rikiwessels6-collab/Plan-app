@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { CATALOG, GROUPS, typeOf } from './catalog'
-import { setBadge, shareCard } from './device'
-import { connect, useGoogle } from './google'
+import { chime, notify, saveFile, setBadge, shareCard } from './device'
+import { connect, reconnect, useGoogle } from './google'
 import { useCardDrag, useFlip } from './drag'
 import { Palette, type Command } from './palette'
 import { Icon, SectionView, shrink } from './sections'
@@ -9,7 +9,7 @@ import { Settings } from './settings'
 import { Ctx, DispatchCtx, emptyHistory, loadState, reducer, saveState, starter, today, useApp, useDispatch, type Action, type Starter } from './store'
 import { pull, setSyncAccount, useSync } from './sync'
 import { uid, type Card, type Space, type State } from './types'
-import { Sheet, UIProvider, useUI } from './ui'
+import { Guard, Sheet, UIProvider, useUI } from './ui'
 
 const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -166,14 +166,20 @@ function Welcome({ onStart, onLoad }: { onStart: (k: Starter) => void; onLoad: (
 function CardBody({ card }: { card: Card }) {
   const dispatch = useDispatch()
   return (
-    <>
+    // if one card's contents cannot be shown, only that card says so; the board carries on
+    <Guard resetKey={card.data} fallback={(retry) => (
+      <div className="broken">
+        <p className="hint">This card could not be shown.</p>
+        <button className="btn soft" onClick={retry}>Try again</button>
+      </div>
+    )}>
       {typeOf(card.type).sections.map((s) => (
         <SectionView
           key={s.key} s={s} value={card.data[s.key]} title={card.title}
           onChange={(value) => dispatch({ t: 'setData', id: card.id, key: s.key, value })}
         />
       ))}
-    </>
+    </Guard>
   )
 }
 const openCount = (card: Card) =>
@@ -188,8 +194,10 @@ interface CardProps {
   onOpen: (id: string) => void
   onDelete: (card: Card) => void
   startDrag: (e: React.PointerEvent<HTMLElement>, id: string) => void
+  /** today's date: changing it redraws the card, so "in 3 days" and today markers stay right overnight */
+  day: string
 }
-const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete, startDrag }: CardProps) {
+const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete, startDrag, day }: CardProps) {
   const dispatch = useDispatch()
   const ui = useUI()
   const type = typeOf(card.type)
@@ -209,7 +217,7 @@ const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete,
   return (
     <article
       className={`card t-${card.type}${type.bare ? ' bare' : ''}${menu ? ' menu-open' : ''}`}
-      data-card={card.id} data-color={card.data.color || undefined} style={{ '--i': Math.min(index, 14) } as React.CSSProperties}
+      data-card={card.id} data-day={day} data-color={card.data.color || undefined} style={{ '--i': Math.min(index, 14) } as React.CSSProperties}
     >
       <header onPointerDown={(e) => startDrag(e, card.id)}>
         <button
@@ -329,8 +337,9 @@ function BoardMenu({ onNew }: { onNew: () => void }) {
                 title: `Delete “${board.name}”?`, cta: 'Delete board', danger: true,
                 body: n ? `Its ${n} card${n > 1 ? 's' : ''} will be deleted too.` : undefined,
               })) {
+                const cards = state.cards.filter((c) => c.boardId === board.id)
                 dispatch({ t: 'removeBoard' })
-                ui.toast(`“${board.name}” deleted`, 'Undo', () => dispatch({ t: 'undo' }))
+                ui.toast(`“${board.name}” deleted`, 'Undo', () => dispatch({ t: 'restoreBoard', board, cards }))
               }
             }}><Icon name="Trash" /> Delete board</button>
           )}
@@ -383,37 +392,63 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
   }, [dispatch])
 
   // a new day: Today and Day plan cards drop what was finished and keep the rest
+  const [day, setDay] = useState(today)
   useEffect(() => {
-    const check = () => {
-      const day = today()
-      const stale = stateRef.current.cards.filter((c) => (c.type === 'today' || c.type === 'day') && c.data._day !== day)
-      if (!stale.length) return
-      const cleared = stale
-        .filter((c) => c.data._day)
-        .reduce((n, c) => n + typeOf(c.type).sections.reduce((m, s) => m + (s.kind === 'checklist' ? ((c.data[s.key] as any[]) ?? []).filter((i) => i.done).length : 0), 0), 0)
-      dispatch({ t: 'rollover', day })
-      if (cleared) ui.toast(`New day. ${cleared} finished item${cleared > 1 ? 's' : ''} cleared.`, 'Undo', () => dispatch({ t: 'undo' }))
-    }
-    check()
-    const iv = setInterval(check, 60000)
-    const wake = () => document.visibilityState === 'visible' && check()
+    const tick = () => setDay(today())
+    const iv = setInterval(tick, 30000)
+    const wake = () => document.visibilityState === 'visible' && tick()
     document.addEventListener('visibilitychange', wake)
     return () => {
       clearInterval(iv)
       document.removeEventListener('visibilitychange', wake)
     }
-  }, [dispatch, ui])
+  }, [])
+  useEffect(() => {
+    const stale = state.cards.filter((c) => (c.type === 'today' || c.type === 'day') && c.data._day !== day)
+    if (!stale.length) return
+    const done = (c: Card) => typeOf(c.type).sections.reduce((m, s) => m + (s.kind === 'checklist' ? ((c.data[s.key] as any[]) ?? []).filter((i) => i.done).length : 0), 0)
+    const had = stale.filter((c) => c.data._day && done(c))
+    const cleared = had.reduce((n, c) => n + done(c), 0)
+    dispatch({ t: 'rollover', day })
+    // Undo puts back exactly the cards as they were (marked as already rolled over, so they are not cleared again)
+    if (cleared)
+      ui.toast(`New day. ${cleared} finished item${cleared > 1 ? 's' : ''} cleared.`, 'Undo', () =>
+        dispatch({ t: 'putCards', cards: had.map((c) => ({ ...c, data: { ...c.data, _day: day } })) }),
+      )
+  }, [state.cards, day, dispatch, ui])
+
+  // focus timers finish here rather than inside their card, so they still finish when the card is
+  // collapsed, filtered out or on another board
+  useEffect(() => {
+    const running = state.cards.filter((c) => c.type === 'timer' && c.data.timer?.endsAt)
+    if (!running.length) return
+    const finish = () => {
+      for (const c of running) {
+        const t = c.data.timer
+        if (t.endsAt > Date.now()) continue
+        const e = new Date(t.endsAt)
+        const on = `${e.getFullYear()}-${String(e.getMonth() + 1).padStart(2, '0')}-${String(e.getDate()).padStart(2, '0')}`
+        dispatch({ t: 'setData', id: c.id, key: 'timer', value: { ...t, endsAt: undefined, left: undefined, done: { ...t.done, [on]: (t.done?.[on] ?? 0) + 1 } } })
+        if (Date.now() - t.endsAt < 60000) {
+          chime()
+          notify(`${c.title || 'Focus'}: time is up`, `${t.mins ?? 25} minutes done. Take a break.`)
+        }
+      }
+    }
+    finish()
+    const iv = setInterval(finish, 1000)
+    return () => clearInterval(iv)
+  }, [state.cards, dispatch])
 
   // home-screen badge: what is still open in Today's top list, plus anything dated today
   useEffect(() => {
-    const day = today()
     let n = 0
     for (const c of state.cards) {
       if (c.type === 'today') n += ((c.data.top as any[]) ?? []).filter((i) => i.text && !i.done).length
       for (const [k, v] of Object.entries(c.data)) if (!k.startsWith('_') && Array.isArray(v)) n += v.filter((r: any) => r?.date === day).length
     }
     setBadge(n)
-  }, [state.cards])
+  }, [state.cards, day])
 
   // bring a card into view and make it obvious which one it is
   useEffect(() => {
@@ -452,6 +487,8 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
     [dispatch],
   )
 
+  const g = useGoogle()
+  const lapsed = g.stale[0] // Google sessions last about an hour; one tap renews
   const space = state.spaces.find((s) => s.id === filter)
   const onBoard = useMemo(() => state.cards.filter((c) => c.boardId === state.boardId), [state.cards, state.boardId])
   const cards = useMemo(() => (space ? onBoard.filter((c) => c.spaceId === space.id) : onBoard), [onBoard, space])
@@ -520,6 +557,7 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
   const ctx = useMemo(() => ({ state, dispatch, openSettings: () => setOverlay('settings'), jumpTo }), [state, dispatch, jumpTo])
   const opened = state.cards.find((c) => c.id === openId)
   const close = useCallback(() => setOverlay(null), [])
+  const closeCard = useCallback(() => setOpenId(null), [])
   // commands chosen in the palette open another overlay, so they must not be closed again by the palette
   const closePalette = useCallback(() => setOverlay((o) => (o === 'palette' ? null : o)), [])
 
@@ -547,6 +585,11 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
           </div>
         </div>
         <nav className="chips" aria-label="Spaces">
+          {lapsed && (
+            <button className="alert" title={lapsed.email} onClick={() => reconnect(lapsed.email).catch((e) => ui.toast(e.message))}>
+              <Icon name="RefreshCw" size={13} /> Reconnect Google
+            </button>
+          )}
           <button aria-pressed={!space} onClick={() => setFilter(null)}>All <em>{onBoard.length}</em></button>
           {state.spaces.map((s) => (
             <button key={s.id} aria-pressed={space?.id === s.id} onClick={() => setFilter(space?.id === s.id ? null : s.id)}>
@@ -570,7 +613,7 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
 
       <main className="board" ref={boardRef} style={{ columns: `150px ${state.cols}` }}>
         {cards.map((c, i) => (
-          <CardView key={c.id} card={c} index={i} spaces={state.spaces} onOpen={onOpen} onDelete={onDelete} startDrag={startDrag} />
+          <CardView key={c.id} card={c} index={i} spaces={state.spaces} onOpen={onOpen} onDelete={onDelete} startDrag={startDrag} day={day} />
         ))}
       </main>
       {!cards.length && (
@@ -588,34 +631,32 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
       {overlay === 'settings' && <Settings onClose={close} />}
       {overlay === 'newboard' && <NewBoard onClose={close} />}
       {overlay === 'palette' && <Palette cards={onBoard} commands={commands} onClose={closePalette} onJump={jumpTo} onNew={add} onCapture={capture} />}
-      {opened && <CardSheet card={opened} space={state.spaces.find((s) => s.id === opened.spaceId)} onClose={() => setOpenId(null)} />}
+      {opened && <CardSheet card={opened} space={state.spaces.find((s) => s.id === opened.spaceId)} onClose={closeCard} />}
     </Ctx.Provider>
   )
 }
 
+const tabs = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('plan')
+
 export default function App() {
   const [h, dispatch] = useReducer(reducer, emptyHistory)
   const state = h.present
-  const [ready, setReady] = useState(false)
+  const [ready, setReady] = useState<'loading' | 'ok' | 'failed'>('loading')
   const [saveErr, setSaveErr] = useState(false)
 
   useEffect(() => {
-    loadState().then((s) => {
-      if (s) dispatch({ t: 'load', state: s })
-      setReady(true)
-    })
+    loadState().then(
+      (s) => {
+        if (s) dispatch({ t: 'load', state: s })
+        setReady('ok')
+      },
+      () => setReady('failed'), // never fall through to "new board": that would overwrite the real one
+    )
   }, [])
   // save shortly after each change, and straight away when the app is put in the background
-  // ask the browser not to clear this app's storage when the device runs low on space
-  const kept = useRef(false)
-  useEffect(() => {
-    if (!state?.updatedAt || kept.current) return
-    kept.current = true
-    navigator.storage?.persist?.().catch(() => {})
-  }, [state?.updatedAt])
   useEffect(() => {
     if (!state) return
-    const save = () => saveState(state).then(() => setSaveErr(false), () => setSaveErr(true))
+    const save = () => saveState(state).then(() => (setSaveErr(false), tabs?.postMessage('saved')), () => setSaveErr(true))
     const t = setTimeout(save, 300)
     const hide = () => document.visibilityState === 'hidden' && save()
     document.addEventListener('visibilitychange', hide)
@@ -626,17 +667,58 @@ export default function App() {
       removeEventListener('pagehide', save)
     }
   }, [state])
+  // the same board open in another tab or window: take in what it saved instead of overwriting it
+  useEffect(() => {
+    const take = () => loadState().then((s) => s && dispatch({ t: 'merge', state: s }), () => {})
+    const wake = () => document.visibilityState === 'visible' && take()
+    tabs?.addEventListener('message', take)
+    document.addEventListener('visibilitychange', wake)
+    return () => {
+      tabs?.removeEventListener('message', take)
+      document.removeEventListener('visibilitychange', wake)
+    }
+  }, [])
+  // ask the browser not to clear this app's storage when the device runs low on space
+  const kept = useRef(false)
+  useEffect(() => {
+    if (!state?.updatedAt || kept.current) return
+    kept.current = true
+    navigator.storage?.persist?.().catch(() => {})
+  }, [state?.updatedAt])
 
-  if (!ready) return null
+  if (ready === 'loading') return null
+  if (ready === 'failed')
+    return (
+      <main className="welcome">
+        <div>
+          <img src="./logo.svg" alt="" width="56" height="56" />
+          <h1>Your board could not be opened.</h1>
+          <p>This device’s storage did not respond. Nothing has been changed. Close other tabs with Plan open, then try again.</p>
+          <button className="btn big" onClick={() => location.reload()}>Try again</button>
+        </div>
+      </main>
+    )
   return (
     <UIProvider>
       {!state ? (
         <Welcome onStart={(k) => dispatch({ t: 'load', state: starter(k) })} onLoad={(state) => dispatch({ t: 'load', state })} />
       ) : (
-        <DispatchCtx.Provider value={dispatch}>
-          <Board state={state} dispatch={dispatch} canUndo={h.past.length > 0} canRedo={h.future.length > 0} />
-          {saveErr && <p className="err banner" role="alert">Could not save to this device. Download a backup from Settings.</p>}
-        </DispatchCtx.Provider>
+        <Guard fallback={(retry) => (
+          <main className="welcome">
+            <div>
+              <img src="./logo.svg" alt="" width="56" height="56" />
+              <h1>Something went wrong.</h1>
+              <p>Your board is still saved on this device. You can download a copy before trying again.</p>
+              <button className="btn big" onClick={retry}>Try again</button>
+              <button className="btn soft big" onClick={() => saveFile('plan-backup.json', 'application/json', JSON.stringify(state))}>Download my board</button>
+            </div>
+          </main>
+        )}>
+          <DispatchCtx.Provider value={dispatch}>
+            <Board state={state} dispatch={dispatch} canUndo={h.past.length > 0} canRedo={h.future.length > 0} />
+            {saveErr && <p className="err banner" role="alert">Could not save to this device. Download a backup from Settings.</p>}
+          </DispatchCtx.Provider>
+        </Guard>
       )}
     </UIProvider>
   )

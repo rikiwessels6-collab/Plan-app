@@ -2,7 +2,7 @@ import { useRef, useState } from 'react'
 import { canInstall, install, isIOS, isStandalone, saveFile } from './device'
 import { connect, disconnect, reconnect, setClientId, useGoogle } from './google'
 import { Icon } from './sections'
-import { useApp } from './store'
+import { normalize, useApp } from './store'
 import { setSyncAccount, useSyncStatus } from './sync'
 import type { State } from './types'
 import { Sheet, useUI } from './ui'
@@ -45,16 +45,21 @@ export function Settings({ onClose }: { onClose: () => void }) {
     applyTheme(t)
   }
   const importAll = async (f?: File) => {
+    if (file.current) file.current.value = '' // so the same file can be chosen again
     if (!f) return
+    let backup: State | null = null
     try {
-      const s = JSON.parse(await f.text()) as State
-      if (!Array.isArray(s.cards) || !Array.isArray(s.boards) || !s.boards.length) throw new Error()
-      if (await ui.confirm({ title: 'Restore this backup?', body: 'It replaces everything currently on this device.', cta: 'Restore', danger: true })) {
-        dispatch({ t: 'load', state: { ...s, updatedAt: Date.now() } })
-        ui.toast('Backup restored')
-      }
-    } catch {
-      setErr('That file is not a Plan backup.')
+      backup = normalize(JSON.parse(await f.text()))
+    } catch {}
+    if (!backup) return setErr('That file is not a Plan backup.')
+    setErr('')
+    const n = backup.cards.length
+    if (await ui.confirm({
+      title: 'Restore this backup?', cta: 'Restore', danger: true,
+      body: `It has ${n} card${n === 1 ? '' : 's'} and replaces everything here${sync.account ? ', on every synced device' : ''}.`,
+    })) {
+      dispatch({ t: 'restore', state: backup })
+      ui.toast('Backup restored')
     }
   }
 

@@ -3,7 +3,7 @@
 // Every device merges what it finds there with what it has (see merge() in store.ts).
 import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react'
 import { gapi, useGoogle } from './google'
-import { merge, type Action } from './store'
+import { merge, normalize, type Action } from './store'
 import type { State } from './types'
 
 const FILE = 'plan-board.json'
@@ -36,8 +36,13 @@ async function fileId(email: string): Promise<string | null> {
 export async function pull(email: string): Promise<State | null> {
   const id = await fileId(email)
   if (!id) return null
-  const s = await gapi(email, `${API}/${id}?alt=media`)
-  return Array.isArray(s?.cards) && Array.isArray(s?.boards) && s.boards.length ? (s as State) : null
+  try {
+    // an empty or damaged file (an upload that was cut off) counts as "nothing there yet" and is simply rewritten
+    return normalize(await gapi(email, `${API}/${id}?alt=media`))
+  } catch (e) {
+    if (e instanceof SyntaxError) return null
+    throw e
+  }
 }
 export async function push(email: string, state: State): Promise<void> {
   let id = await fileId(email)

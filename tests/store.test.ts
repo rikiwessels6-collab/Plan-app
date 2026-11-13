@@ -99,3 +99,79 @@ describe('merge', () => {
     expect(m.boardId).toBe(s.boardId)
   })
 })
+
+describe('review fixes', () => {
+  const base = (): State => run(boot(), { t: 'addCard', id: 'a', type: 'today', title: 'A' }).present!
+  const edit = (s: State, a: Action) => reducer({ ...emptyHistory, present: s }, a).present!
+
+  it('keeps edits made to different parts of one card on two devices', async () => {
+    const s = base()
+    const phone = edit(s, { t: 'setData', id: 'a', key: 'top', value: [{ text: 'milk', done: true }] })
+    await new Promise((r) => setTimeout(r, 3))
+    const laptop = edit(edit(s, { t: 'setData', id: 'a', key: 'rest', value: [{ text: 'eggs', done: false }] }), { t: 'patchCard', id: 'a', patch: { title: 'Renamed' } })
+    for (const m of [merge(phone, laptop), merge(laptop, phone)]) {
+      const c = m.cards.find((x) => x.id === 'a')!
+      expect(c.data.top).toEqual([{ text: 'milk', done: true }])
+      expect(c.data.rest).toEqual([{ text: 'eggs', done: false }])
+      expect(c.title).toBe('Renamed')
+    }
+    // and once combined, both sides agree and stop changing
+    const m = merge(phone, laptop)
+    expect(merge(m, laptop)).toBe(m)
+    expect(merge(laptop, m).cards.find((x) => x.id === 'a')).toEqual(m.cards.find((x) => x.id === 'a'))
+  })
+  it('does not let a new-day clear-out overwrite newer work from another device', async () => {
+    const s = edit(base(), { t: 'setData', id: 'a', key: 'top', value: [{ text: 'old', done: true }] })
+    const stale = { ...s, cards: s.cards.map((c) => (c.id === 'a' ? { ...c, data: { ...c.data, _day: '2000-01-01' } } : c)) }
+    await new Promise((r) => setTimeout(r, 3))
+    const phone = edit(stale, { t: 'setData', id: 'a', key: 'top', value: [{ text: 'old', done: true }, { text: 'added at night', done: false }] })
+    const laptop = edit(stale, { t: 'rollover', day: '2999-01-01' })
+    expect(laptop.cards.find((c) => c.id === 'a')!.u).toBe(stale.cards.find((c) => c.id === 'a')!.u)
+    expect(merge(laptop, phone).cards.find((c) => c.id === 'a')!.data.top).toHaveLength(2)
+  })
+  it('keeps a blank board and a rename made on the other device', async () => {
+    const s = base()
+    const a = edit(edit(s, { t: 'addBoard', name: 'Blank one' }), { t: 'setBoard', id: s.boardId })
+    const a2 = edit(a, { t: 'renameBoard', name: 'Renamed board' })
+    await new Promise((r) => setTimeout(r, 3))
+    const b = edit(s, { t: 'setData', id: 'a', key: 'top', value: [] }) // newer overall
+    const names = merge(b, a2).boards.map((x) => x.name).sort()
+    expect(names).toEqual(['Blank one', 'Renamed board'])
+  })
+  it('keeps a deleted board deleted, and spreads a deletion the other side has not seen', async () => {
+    const two = edit(base(), { t: 'addBoard', name: 'Temp' })
+    const removed = edit(two, { t: 'removeBoard' })
+    expect(merge(removed, two).boards).toHaveLength(1)
+    expect(merge(two, removed).boards).toHaveLength(1)
+    const s = base()
+    const gone = edit(s, { t: 'removeCard', id: 'a' })
+    const third: State = { ...gone, cards: gone.cards, deleted: {} } // a copy that never heard about the delete
+    expect(merge(third, gone)).not.toBe(third)
+    expect(merge(third, gone).deleted!.a).toBeGreaterThan(0)
+  })
+  it('restoring a backup wins over what is there and marks the rest deleted', () => {
+    const s = edit(base(), { t: 'addCard', id: 'extra', type: 'note' })
+    const backup: State = { ...s, cards: s.cards.filter((c) => c.id !== 'extra').map((c) => ({ ...c, u: 1 })) }
+    const h = reducer({ ...emptyHistory, present: s }, { t: 'restore', state: backup })
+    expect(h.present!.cards.some((c) => c.id === 'extra')).toBe(false)
+    expect(h.present!.deleted!.extra).toBeGreaterThan(0)
+    expect(merge(h.present!, s).cards.some((c) => c.id === 'extra')).toBe(false)
+  })
+  it('repairs or rejects data that is not a valid board', async () => {
+    const { normalize } = await import('../src/store')
+    expect(normalize(null)).toBeNull()
+    expect(normalize({ cards: [], boards: [] })).toBeNull()
+    const fixed = normalize({ boards: [{ id: 'b' }], boardId: 'nope', cards: [{ id: 'c', type: 'note', boardId: 'b' }, { id: 'd', type: 'note', boardId: 'missing' }, 7] })!
+    expect(fixed.boardId).toBe('b')
+    expect(fixed.spaces).toEqual([])
+    expect(fixed.cols).toBe(4)
+    expect(fixed.cards).toEqual([{ id: 'c', type: 'note', boardId: 'b', title: '', data: {} }])
+  })
+  it('makes one undo step of a whole drag', () => {
+    let h = run(boot(), { t: 'addCard', id: 'a', type: 'todo', title: 'A' }, { t: 'addCard', id: 'b', type: 'todo', title: 'B' }, { t: 'addCard', id: 'c', type: 'todo', title: 'C' })
+    const before = titles(h)
+    h = run(h, { t: 'moveCard', id: 'c', afterId: 'b' }, { t: 'moveCard', id: 'c', afterId: 'a' })
+    h = run(h, { t: 'undo' })
+    expect(titles(h)).toEqual(before)
+  })
+})

@@ -99,6 +99,23 @@ async function core(browser) {
   await page.click('.toast button')
   check('delete then Undo restores the card', n1 === n0 - 1 && (await page.locator('[data-card]').count()) === n0)
 
+  // typing inside an opened card keeps the cursor there
+  await page.locator('[data-card].t-today button.badge').click()
+  await page.waitForSelector('.sheet.wide')
+  await page.locator('.sheet.wide [data-row]').nth(4).click()
+  await page.keyboard.type('typed in the sheet')
+  check('typing in an opened card keeps focus', (await page.locator('.sheet.wide [data-row]').nth(4).inputValue()) === 'typed in the sheet')
+  await page.keyboard.press('Tab')
+  await page.keyboard.press('Tab')
+  check('Tab stays inside the sheet', await page.evaluate(() => !!document.activeElement.closest('.sheet')))
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+
+  // a link with a stray % must not break anything
+  await addCard(page, 'Link')
+  await page.locator('.t-link input[type=url]').fill('https://example.com/50%off')
+  check('a malformed link is shown, not fatal', (await page.locator('.t-link .pin').innerText()).includes('example.com') && (await page.locator('[data-card]').count()) > 5)
+
   // persistence
   await page.waitForTimeout(500)
   await page.reload()

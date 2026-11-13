@@ -6,7 +6,7 @@ export type Section =
   | { kind: 'habit'; key: string }
   | { kind: 'amounts'; key: string; label?: string; budget?: boolean }
   | { kind: 'fields'; key: string; fields: string[] }
-  | { kind: 'dates'; key: string }
+  | { kind: 'dates'; key: string; yearly?: boolean }
   | { kind: 'countdown'; key: string }
   | { kind: 'link'; key: string }
   | { kind: 'number'; key: string }
@@ -41,17 +41,21 @@ export interface Card {
   data: Record<string, any>
   /** last-changed time (ms); lets two devices merge their boards card by card */
   u?: number
+  /** when each part of the card last changed ('#t' title, '#s' space, otherwise a data key), so edits to different parts on two devices both survive */
+  k?: Record<string, number>
 }
 
 export interface Space {
   id: string
   name: string
   color: string
+  u?: number
 }
 
 export interface Board {
   id: string
   name: string
+  u?: number
 }
 
 export interface State {
@@ -60,7 +64,7 @@ export interface State {
   spaces: Space[]
   cards: Card[]
   cols: number
-  /** when each deleted card was deleted, so a sync does not bring it back */
+  /** when each deleted card, board or space was deleted, so a sync does not bring it back */
   deleted?: Record<string, number>
   updatedAt?: number
 }

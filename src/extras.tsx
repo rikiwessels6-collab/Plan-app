@@ -1,8 +1,9 @@
 // Card sections that use the device or the whole board: place, weather, focus timer, upcoming, colour.
 import { useEffect, useState } from 'react'
-import { askNotify, chime, locate, mapsUrl, notify } from './device'
+import { askNotify, locate, mapsUrl } from './device'
 import { useEvents } from './google'
 import { Icon } from './sections'
+import { nextYearly } from './sections'
 import { today, useApp } from './store'
 
 type P<T = any> = { value: T | undefined; onChange: (v: T) => void }
@@ -109,6 +110,16 @@ export function Weather({ value, onChange }: P<{ lat?: number; lon?: number; nam
   const [busy, setBusy] = useState(false)
   const loc = useLocate((p) => onChange({ ...p, name: 'My location' }))
   const has = value?.lat !== undefined
+  const [tick, setTick] = useState(0)
+  useEffect(() => {
+    const wake = () => document.visibilityState === 'visible' && setTick((n) => n + 1)
+    document.addEventListener('visibilitychange', wake)
+    addEventListener('online', wake)
+    return () => {
+      document.removeEventListener('visibilitychange', wake)
+      removeEventListener('online', wake)
+    }
+  }, [])
   useEffect(() => {
     if (!has) return setWx(null)
     let off = false
@@ -117,7 +128,7 @@ export function Weather({ value, onChange }: P<{ lat?: number; lon?: number; nam
     return () => {
       off = true
     }
-  }, [has, value?.lat, value?.lon])
+  }, [has, value?.lat, value?.lon, tick])
 
   if (!has)
     return (
@@ -191,17 +202,6 @@ export function FocusTimer({ value, onChange, title }: P<Timer> & { title: strin
     const iv = setInterval(() => setNow(Date.now()), 250)
     return () => clearInterval(iv)
   }, [running])
-  useEffect(() => {
-    if (!running || left > 0) return
-    // finished (possibly while the app was closed): record it once
-    onChange({ ...v, endsAt: undefined, left: undefined, done: { ...v.done, [day]: (v.done?.[day] ?? 0) + 1 } })
-    if (Date.now() - v.endsAt! < 5000) {
-      chime()
-      notify(`${title || 'Focus'}: time is up`, `${mins} minutes done. Take a break.`)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [running, left <= 0])
-
   const R = 54, C = 2 * Math.PI * R
   const frac = Math.max(0, Math.min(1, left / total))
   return (
@@ -215,7 +215,7 @@ export function FocusTimer({ value, onChange, title }: P<Timer> & { title: strin
       </div>
       <div className="btns">
         {running ? (
-          <button className="btn" onClick={() => onChange({ ...v, endsAt: undefined, left: Math.max(0, v.endsAt! - Date.now()) })}>
+          <button className="btn" onClick={() => onChange({ ...v, endsAt: undefined, left: Math.max(1000, v.endsAt! - Date.now()) })}>
             <Icon name="Pause" size={14} /> Pause
           </button>
         ) : (
@@ -258,7 +258,8 @@ export function Upcoming() {
     for (const [k, v] of Object.entries(c.data)) {
       if (k.startsWith('_')) continue
       if (Array.isArray(v)) {
-        v.forEach((r: any, i) => isDate(r?.date) && items.push({ key: `${c.id}${k}${i}`, when: dayOf(r.date), label: r.label || c.title, cardId: c.id }))
+        // birthdays and anniversaries come round every year
+        v.forEach((r: any, i) => isDate(r?.date) && items.push({ key: `${c.id}${k}${i}`, when: dayOf(c.type === 'dates' ? nextYearly(r.date) : r.date), label: r.label || c.title, cardId: c.id }))
       } else if (isDate(v)) items.push({ key: c.id + k, when: dayOf(v), label: c.title, cardId: c.id })
       else if (c.type === 'month' && v && typeof v === 'object')
         for (const [d, note] of Object.entries(v)) if (isDate(d) && note) items.push({ key: c.id + d, when: dayOf(d), label: String(note), cardId: c.id })

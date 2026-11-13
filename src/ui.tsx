@@ -1,8 +1,20 @@
 // Shared interface pieces: sheets, dialogs and toasts.
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Component, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Icon } from './sections'
 
 const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches
+
+/** Keep Tab inside a panel: wraps at the ends and pulls focus back in if it has escaped. */
+export function trap(panel: HTMLElement, e: KeyboardEvent | React.KeyboardEvent) {
+  const f = [...panel.querySelectorAll<HTMLElement>('button, input, textarea, select, a[href]')].filter(
+    (el) => !(el as HTMLButtonElement).disabled && el.tabIndex !== -1 && el.getClientRects().length > 0,
+  )
+  if (!f.length) return e.preventDefault()
+  const first = f[0], last = f[f.length - 1], cur = document.activeElement
+  if (!panel.contains(cur) || cur === panel) (e.preventDefault(), (e.shiftKey ? last : first).focus())
+  else if (e.shiftKey && cur === first) (e.preventDefault(), last.focus())
+  else if (!e.shiftKey && cur === last) (e.preventDefault(), first.focus())
+}
 
 /** Bottom sheet on phones (swipe down to close), centred panel on larger screens. */
 export function Sheet({ title, onClose, children, wide, head }: {
@@ -14,30 +26,32 @@ export function Sheet({ title, onClose, children, wide, head }: {
 }) {
   const [closing, setClosing] = useState(false)
   const panel = useRef<HTMLDivElement>(null)
+  // the latest onClose without re-running the effects below (callers often pass a new function each render)
+  const done = useRef(onClose)
+  done.current = onClose
   const close = useCallback(() => {
-    if (reduced()) return onClose()
+    if (reduced()) return done.current()
     setClosing(true)
-    setTimeout(onClose, 190)
-  }, [onClose])
+    setTimeout(() => done.current(), 190)
+  }, [])
 
   useEffect(() => {
     const before = document.activeElement as HTMLElement | null
+    if (!panel.current?.contains(document.activeElement)) panel.current?.focus({ preventScroll: true })
     const key = (e: KeyboardEvent) => {
+      // a dialog or photo on top of this sheet handles its own keys
+      if (document.querySelector('.scrim.mid, .lightbox')) return
       if (e.key === 'Escape') close()
-      if (e.key !== 'Tab' || !panel.current) return
-      // keep focus inside the sheet
-      const f = panel.current.querySelectorAll<HTMLElement>('button, input, textarea, select, a[href]')
-      if (!f.length) return
-      const first = f[0], last = f[f.length - 1]
-      if (e.shiftKey && document.activeElement === first) (e.preventDefault(), last.focus())
-      else if (!e.shiftKey && document.activeElement === last) (e.preventDefault(), first.focus())
+      if (e.key === 'Tab' && panel.current) trap(panel.current, e)
     }
     document.addEventListener('keydown', key)
     document.documentElement.classList.add('locked')
     return () => {
       document.removeEventListener('keydown', key)
       document.documentElement.classList.remove('locked')
-      before?.focus?.({ preventScroll: true })
+      // give focus back only if it was still inside the sheet (a new card may have taken it on purpose)
+      if (!document.activeElement || document.activeElement === document.body || panel.current?.contains(document.activeElement))
+        before?.focus?.({ preventScroll: true })
     }
   }, [close])
 
@@ -61,13 +75,13 @@ export function Sheet({ title, onClose, children, wide, head }: {
     panel.current.style.transition = ''
     if (far) {
       panel.current.style.transform = 'translateY(100%)'
-      setTimeout(onClose, 180)
+      setTimeout(() => done.current(), 180)
     } else panel.current.style.transform = ''
   }
 
   return (
     <div className={`scrim${closing ? ' out' : ''}`} onPointerDown={(e) => e.target === e.currentTarget && close()}>
-      <div className={`sheet${wide ? ' wide' : ''}`} ref={panel} role="dialog" aria-modal aria-label={title}>
+      <div className={`sheet${wide ? ' wide' : ''}`} ref={panel} tabIndex={-1} role="dialog" aria-modal aria-label={title}>
         <header onPointerDown={down} onPointerMove={move} onPointerUp={up} onPointerCancel={up}>
           <i className="grabber" aria-hidden />
           {head ?? <h2>{title}</h2>}
@@ -104,14 +118,18 @@ function Dialog({ d, close }: { d: Dlg; close: () => void }) {
     } else d.done(true)
     close()
   }
+  const form = useRef<HTMLFormElement>(null)
   useEffect(() => {
-    const key = (e: KeyboardEvent) => e.key === 'Escape' && cancel()
+    const key = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cancel()
+      if (e.key === 'Tab' && form.current) trap(form.current, e)
+    }
     document.addEventListener('keydown', key)
     return () => document.removeEventListener('keydown', key)
   })
   return (
     <div className="scrim mid" onPointerDown={(e) => e.target === e.currentTarget && cancel()}>
-      <form className="dialog" role="alertdialog" aria-modal aria-label={d.o.title} onSubmit={(e) => (e.preventDefault(), ok())}>
+      <form ref={form} className="dialog" role="alertdialog" aria-modal aria-label={d.o.title} onSubmit={(e) => (e.preventDefault(), ok())}>
         <h2>{d.o.title}</h2>
         {d.o.body && <p>{d.o.body}</p>}
         {d.kind === 'ask' && (
@@ -181,4 +199,18 @@ export function UIProvider({ children }: { children: ReactNode }) {
       </div>
     </UICtx.Provider>
   )
+}
+
+/** Catches a crash in one part of the screen so the rest keeps working. */
+export class Guard extends Component<{ children: ReactNode; fallback: (retry: () => void, error: unknown) => ReactNode; resetKey?: unknown }, { error: unknown }> {
+  state = { error: null as unknown }
+  static getDerivedStateFromError(error: unknown) {
+    return { error: error ?? new Error('Unknown error') }
+  }
+  componentDidUpdate(prev: { resetKey?: unknown }) {
+    if (this.state.error && prev.resetKey !== this.props.resetKey) this.setState({ error: null })
+  }
+  render() {
+    return this.state.error ? this.props.fallback(() => this.setState({ error: null }), this.state.error) : this.props.children
+  }
 }
