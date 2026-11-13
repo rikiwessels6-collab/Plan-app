@@ -86,6 +86,8 @@ interface UI {
   ask: (o: AskOpts) => Promise<string | null>
   confirm: (o: ConfirmOpts) => Promise<boolean>
   toast: (text: string, action?: string, run?: () => void) => void
+  /** show a photo full screen */
+  view: (src: string, caption?: string) => void
 }
 const UICtx = createContext<UI>(null as any)
 export const useUI = () => useContext(UICtx)
@@ -135,7 +137,14 @@ function Dialog({ d, close }: { d: Dlg; close: () => void }) {
 export function UIProvider({ children }: { children: ReactNode }) {
   const [dlg, setDlg] = useState<Dlg | null>(null)
   const [toast, setToast] = useState<Toast | null>(null)
+  const [photo, setPhoto] = useState<{ src: string; caption?: string } | null>(null)
   const timer = useRef(0)
+  useEffect(() => {
+    if (!photo) return
+    const key = (e: KeyboardEvent) => e.key === 'Escape' && setPhoto(null)
+    document.addEventListener('keydown', key)
+    return () => document.removeEventListener('keydown', key)
+  }, [photo])
   const ui = useMemo<UI>(
     () => ({
       ask: (o) => new Promise((done) => setDlg({ kind: 'ask', o, done })),
@@ -145,6 +154,7 @@ export function UIProvider({ children }: { children: ReactNode }) {
         setToast({ id: Date.now(), text, action, run })
         timer.current = window.setTimeout(() => setToast(null), action ? 6000 : 2600)
       },
+      view: (src, caption) => setPhoto({ src, caption }),
     }),
     [],
   )
@@ -152,6 +162,13 @@ export function UIProvider({ children }: { children: ReactNode }) {
     <UICtx.Provider value={ui}>
       {children}
       {dlg && <Dialog d={dlg} close={() => setDlg(null)} />}
+      {photo && (
+        <div className="lightbox" role="dialog" aria-modal aria-label={photo.caption || 'Photo'} onClick={() => setPhoto(null)}>
+          <img src={photo.src} alt={photo.caption || ''} />
+          {photo.caption && <p>{photo.caption}</p>}
+          <button className="ghost" aria-label="Close photo" autoFocus><Icon name="X" size={18} /></button>
+        </div>
+      )}
       <div className="toasts" role="status" aria-live="polite">
         {toast && (
           <div className="toast" key={toast.id}>

@@ -65,7 +65,7 @@ export function GoogleInbox() {
             {data.map((m) => (
               <li key={m.account + m.id}>
                 <a href={m.url} target="_blank" rel="noreferrer">
-                  <b>{m.from}</b>
+                  <b>{m.from}<time>{since(m.date)}</time></b>
                   <span>{m.subject}</span>
                   {live.length > 1 && <small>{m.account}</small>}
                 </a>
@@ -84,6 +84,10 @@ export function GoogleInbox() {
   )
 }
 
+const since = (ms: number) => {
+  const m = Math.max(0, Math.round((Date.now() - ms) / 60000))
+  return m < 1 ? 'now' : m < 60 ? `${m}m` : m < 1440 ? `${Math.round(m / 60)}h` : m < 10080 ? `${Math.round(m / 1440)}d` : new Date(ms).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })
+}
 const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString()
 const time = (d: Date) => d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 

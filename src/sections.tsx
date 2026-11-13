@@ -4,6 +4,7 @@ import { addToCalendar, hasContactPicker, parseVcards, pickContacts, type Person
 import { FocusTimer, Place, Swatch, Upcoming, Weather } from './extras'
 import { GoogleAgenda, GoogleInbox } from './GoogleSections'
 import type { Section } from './types'
+import { useUI } from './ui'
 
 export function Icon({ name, size = 16 }: { name: string; size?: number }) {
   const C = icons[name] ?? icons.Circle
@@ -105,6 +106,7 @@ export async function shrink(file: File): Promise<string> {
 }
 
 function Photo({ value, onChange }: P<{ src?: string; caption?: string }>) {
+  const ui = useUI()
   const v = value ?? {}
   const pick = async (f?: File) => f && onChange({ ...v, src: await shrink(f) })
   if (!v.src)
@@ -117,7 +119,9 @@ function Photo({ value, onChange }: P<{ src?: string; caption?: string }>) {
     )
   return (
     <figure className="photo">
-      <img src={v.src} alt={v.caption || 'Photo'} />
+      <button className="zoomable" aria-label="View photo full screen" onClick={() => ui.view(v.src!, v.caption)}>
+        <img src={v.src} alt={v.caption || 'Photo'} />
+      </button>
       <button className="ghost over" aria-label="Remove photo" onClick={() => onChange({ ...v, src: undefined })}>
         <Icon name="X" size={14} />
       </button>
@@ -130,6 +134,7 @@ function Photo({ value, onChange }: P<{ src?: string; caption?: string }>) {
 }
 
 function Photos({ value, onChange }: P<string[]>) {
+  const ui = useUI()
   const v = value ?? []
   const add = async (files: FileList | null) => {
     if (!files) return
@@ -139,7 +144,7 @@ function Photos({ value, onChange }: P<string[]>) {
     <div className="grid">
       {v.map((src, i) => (
         <div className="cell" key={i}>
-          <img src={src} alt="" />
+          <button className="zoomable" aria-label="View photo full screen" onClick={() => ui.view(src)}><img src={src} alt="" /></button>
           <button className="ghost over" aria-label="Remove photo" onClick={() => onChange(v.filter((_, j) => j !== i))}>
             <Icon name="X" size={12} />
           </button>
@@ -233,12 +238,12 @@ function Amounts({ value, onChange, budget }: P<{ budget?: number | ''; rows?: A
   )
 }
 
-function Fields({ value, onChange, fields }: P<Record<string, string>> & { fields: string[] }) {
+function Fields({ value, onChange, fields, now }: P<Record<string, string>> & { fields: string[]; now?: string }) {
   const v = value ?? {}
   return (
     <div className="rows">
       {fields.map((f) => (
-        <label className="row slot" key={f}>
+        <label className={`row slot${f === now ? ' now' : ''}`} key={f}>
           <span>{f}</span>
           <input value={v[f] ?? ''} onChange={(e) => onChange({ ...v, [f]: e.target.value })} />
         </label>
@@ -248,7 +253,9 @@ function Fields({ value, onChange, fields }: P<Record<string, string>> & { field
 }
 
 function Slots({ value, onChange, labels }: P<Record<string, string>> & { labels: string[] }) {
-  return <Fields value={value} onChange={onChange} fields={labels} />
+  // week-style cards mark today's row
+  const now = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][new Date().getDay()]
+  return <Fields value={value} onChange={onChange} fields={labels} now={now} />
 }
 
 interface DateRow { label: string; date: string }
@@ -292,13 +299,25 @@ function Countdown({ value, onChange, title }: P<string> & { title: string }) {
 }
 
 function LinkBox({ value, onChange }: P<string>) {
-  const ok = /^https?:\/\/\S+\.\S+/.test(value ?? '')
+  let url: URL | null = null
+  try {
+    url = /^https?:\/\/\S+\.\S+/.test(value ?? '') ? new URL(value!) : null // only web links are ever made clickable
+  } catch {}
   return (
-    <div className="row link">
-      <input type="url" inputMode="url" value={value ?? ''} placeholder="https://" onChange={(e) => onChange(e.target.value)} />
-      {ok && (
-        <a className="ghost" href={value} target="_blank" rel="noreferrer" aria-label="Open link"><Icon name="ExternalLink" /></a>
+    <div className="linkbox">
+      {url && (
+        <a className="pin" href={url.href} target="_blank" rel="noreferrer">
+          <Icon name="Link" />
+          <span>
+            <b>{url.hostname.replace(/^www\./, '')}</b>
+            {url.pathname.length > 1 && <small>{decodeURIComponent(url.pathname).slice(0, 60)}</small>}
+          </span>
+          <Icon name="ExternalLink" size={14} />
+        </a>
       )}
+      <div className="row link">
+        <input type="url" inputMode="url" autoCapitalize="off" value={value ?? ''} placeholder="Paste a link" aria-label="Link" onChange={(e) => onChange(e.target.value.trim())} />
+      </div>
     </div>
   )
 }

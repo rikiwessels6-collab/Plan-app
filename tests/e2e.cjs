@@ -293,7 +293,7 @@ async function google(browser) {
   await fakeGoogle(a.ctx, drive)
   await begin(a.page)
   await a.page.waitForSelector('.mails li')
-  check('inbox lists unread mail, newest first', (await a.page.locator('.mails li').allInnerTexts()).join('|') === 'Sam Lee\nInvoice m2|Sam Lee\nInvoice m1')
+  check('inbox lists unread mail, newest first', (await a.page.locator('.mails li span').allInnerTexts()).join('|') === 'Invoice m2|Invoice m1')
   const agenda = (await a.page.locator('.t-agenda').innerText()).replace(/\n/g, ' | ')
   check('calendar shows every ticked calendar', agenda.includes('Dentist') && agenda.includes('School play'), agenda)
   check('calendar colours come from Google', (await a.page.locator('.t-agenda .ev').first().getAttribute('style')).includes('#0b8043'))

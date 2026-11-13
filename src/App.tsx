@@ -1,12 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { CATALOG, GROUPS, typeOf } from './catalog'
 import { setBadge, shareCard } from './device'
+import { connect, useGoogle } from './google'
 import { useCardDrag, useFlip } from './drag'
 import { Palette, type Command } from './palette'
 import { Icon, SectionView, shrink } from './sections'
 import { Settings } from './settings'
 import { Ctx, DispatchCtx, emptyHistory, loadState, reducer, saveState, starter, today, useApp, useDispatch, type Action, type Starter } from './store'
-import { useSync } from './sync'
+import { pull, setSyncAccount, useSync } from './sync'
 import { uid, type Card, type Space, type State } from './types'
 import { Sheet, UIProvider, useUI } from './ui'
 
@@ -122,8 +123,27 @@ function NewBoard({ onClose }: { onClose: () => void }) {
   )
 }
 
-function Welcome({ onStart }: { onStart: (k: Starter) => void }) {
+function Welcome({ onStart, onLoad }: { onStart: (k: Starter) => void; onLoad: (s: State) => void }) {
   const [pick, setPick] = useState<Starter>('life')
+  const g = useGoogle()
+  const ui = useUI()
+  const [busy, setBusy] = useState(false)
+  // someone who already uses Plan on another device: sign in and bring that board here
+  const bring = async () => {
+    setBusy(true)
+    try {
+      if (!g.live.length) await connect()
+      const email = (JSON.parse(localStorage.getItem('plan.google.accounts') ?? '[]') as string[]).slice(-1)[0]
+      const board = email ? await pull(email) : null
+      if (board) {
+        setSyncAccount(email)
+        onLoad(board)
+      } else ui.toast('No board is synced to that account yet')
+    } catch (e: any) {
+      ui.toast(e?.message || 'Could not reach Google')
+    }
+    setBusy(false)
+  }
   return (
     <main className="welcome">
       <div>
@@ -132,6 +152,11 @@ function Welcome({ onStart }: { onStart: (k: Starter) => void }) {
         <p>Tasks, notes, photos, money, mail and calendar side by side. Pick a starting point; you can change every card later.</p>
         <Starts pick={pick} setPick={setPick} />
         <button className="btn big" onClick={() => onStart(pick)}>Create my board</button>
+        {g.clientId && (
+          <button className="btn soft big" disabled={busy} onClick={bring}>
+            {busy ? 'Looking for your board…' : 'I already have a board: sync it here'}
+          </button>
+        )}
         <small className="hint">Saved privately on this device. No account needed.</small>
       </div>
     </main>
@@ -151,6 +176,8 @@ function CardBody({ card }: { card: Card }) {
     </>
   )
 }
+const openCount = (card: Card) =>
+  typeOf(card.type).sections.reduce((n, s) => n + (s.kind === 'checklist' ? ((card.data[s.key] as any[]) ?? []).filter((i) => i.text && !i.done).length : 0), 0)
 const hasDone = (card: Card) =>
   typeOf(card.type).sections.some((s) => s.kind === 'checklist' && (card.data[s.key] as any[] | undefined)?.some((i) => i.done))
 
@@ -219,6 +246,11 @@ const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete,
               </div>
               <hr />
               {hasDone(card) && <button role="menuitem" onClick={() => act({ t: 'clearDone', id: card.id })}><Icon name="ListX" /> Clear finished</button>}
+              {!type.bare && (
+                <button role="menuitem" onClick={() => act({ t: 'setData', id: card.id, key: '_c', value: card.data._c ? undefined : true })}>
+                  <Icon name={card.data._c ? 'ChevronsUpDown' : 'ChevronsDownUp'} /> {card.data._c ? 'Expand' : 'Collapse'}
+                </button>
+              )}
               <button role="menuitem" onClick={() => act({ t: 'moveCard', id: card.id, step: -1 })}><Icon name="ArrowUp" /> Move earlier</button>
               <button role="menuitem" onClick={() => act({ t: 'moveCard', id: card.id, step: 1 })}><Icon name="ArrowDown" /> Move later</button>
               <button role="menuitem" onClick={() => act({ t: 'dupCard', id: card.id })}><Icon name="Copy" /> Duplicate</button>
@@ -228,7 +260,13 @@ const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete,
         </div>
       </header>
       {space && <div className="spacename">{space.name}</div>}
-      <CardBody card={card} />
+      {card.data._c && !type.bare ? (
+        <button className="folded" onClick={() => dispatch({ t: 'setData', id: card.id, key: '_c', value: undefined })}>
+          {openCount(card) ? `${openCount(card)} to do` : 'Show'} <Icon name="ChevronDown" size={14} />
+        </button>
+      ) : (
+        <CardBody card={card} />
+      )}
     </article>
   )
 })
@@ -568,6 +606,13 @@ export default function App() {
     })
   }, [])
   // save shortly after each change, and straight away when the app is put in the background
+  // ask the browser not to clear this app's storage when the device runs low on space
+  const kept = useRef(false)
+  useEffect(() => {
+    if (!state?.updatedAt || kept.current) return
+    kept.current = true
+    navigator.storage?.persist?.().catch(() => {})
+  }, [state?.updatedAt])
   useEffect(() => {
     if (!state) return
     const save = () => saveState(state).then(() => setSaveErr(false), () => setSaveErr(true))
@@ -586,7 +631,7 @@ export default function App() {
   return (
     <UIProvider>
       {!state ? (
-        <Welcome onStart={(k) => dispatch({ t: 'load', state: starter(k) })} />
+        <Welcome onStart={(k) => dispatch({ t: 'load', state: starter(k) })} onLoad={(state) => dispatch({ t: 'load', state })} />
       ) : (
         <DispatchCtx.Provider value={dispatch}>
           <Board state={state} dispatch={dispatch} canUndo={h.past.length > 0} canRedo={h.future.length > 0} />

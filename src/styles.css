@@ -655,6 +655,36 @@ input[type='date'], input[type='time'] { font-variant-numeric: tabular-nums; }
 .dropzone { position: fixed; inset: 0; z-index: 90; background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); display: grid; place-items: center; pointer-events: none; animation: fade 0.2s; }
 .dropzone span { display: flex; align-items: center; gap: 12px; padding: 26px 34px; border-radius: 24px; border: 2px dashed var(--accent); font: 560 20px var(--serif); color: var(--ink); background: var(--card); }
 
+
+/* ---------- photo viewer, folded cards, link preview, misc ---------- */
+.zoomable { display: block; width: 100%; height: 100%; cursor: zoom-in; border-radius: inherit; }
+.photo .zoomable { height: auto; }
+.lightbox { position: fixed; inset: 0; z-index: 95; background: rgba(12, 10, 6, 0.92); display: grid; place-items: center; align-content: center; gap: 14px; padding: 24px; cursor: zoom-out; animation: fade 0.2s; }
+.lightbox img { max-width: 100%; max-height: calc(100dvh - 110px); border-radius: 10px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.6); animation: dialog-in 0.3s var(--ease); }
+.lightbox p { color: #f2ede2; font: 500 16px var(--serif); text-align: center; }
+.lightbox .ghost { position: absolute; top: calc(14px + env(safe-area-inset-top)); right: 14px; background: rgba(255, 255, 255, 0.14); color: #fff; width: 40px; height: 40px; }
+.folded { display: flex; align-items: center; gap: 4px; margin: 8px 0 0 35px; font-size: 12.5px; font-weight: 500; color: var(--mute); padding: 2px 0; }
+.folded:hover { color: var(--ink); }
+.linkbox { display: grid; gap: 6px; }
+.row.slot.now span { color: var(--accent); }
+.row.slot.now { border-bottom-color: color-mix(in srgb, var(--accent) 45%, var(--line)); }
+.mails b { display: flex; justify-content: space-between; gap: 8px; }
+.mails b time { font-weight: 500; font-size: 11px; color: var(--mute); flex: none; }
+.sec h4 span.all { animation: cheer 0.7s var(--spring); border-radius: 999px; }
+@keyframes cheer {
+  0% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); }
+  35% { transform: scale(1.5); }
+  100% { transform: scale(1); box-shadow: 0 0 0 14px transparent; }
+}
+.welcome .btn.soft.big { width: 100%; font-size: 14.5px; height: 46px; }
+
+@media print {
+  .top .tools, .chips, .fab, .toasts, .card > header .menuwrap, .swatches, .bring, .drop { display: none !important; }
+  .top { position: static; backdrop-filter: none; }
+  body { background: #fff; }
+  .card { box-shadow: none; border: 1px solid #ddd; animation: none; }
+}
+
 /* ---------- small screens and touch ---------- */
 @media (min-width: 640px) {
   .scrim { align-items: center; padding: 24px; }

@@ -44,7 +44,7 @@ export function starter(kind: Starter): State {
     id: uid(), boardId: b, type, title: title ?? typeOf(type).name, spaceId: space === undefined ? undefined : spaces[space]?.id,
     data: type === 'today' || type === 'day' ? { _day: today(), ...data } : data,
   })
-  const hello = c('sticky', undefined, 'Welcome', { text: 'Tap + to add anything.\nHold a card to move it.' })
+  const hello = c('sticky', undefined, 'Welcome', { text: 'Tap + to add a card.\nHold a card to move it.\nTap the magnifier to find or jot anything.' })
   const cards =
     kind === 'work'
       ? [c('today', 0), c('agenda', 0), c('gmail', 0), c('project', 0), hello, c('roadmap', 1), c('meeting', 1), c('waiting', 1), c('client', 2), c('ideas'), c('note')]
