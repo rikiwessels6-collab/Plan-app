@@ -357,6 +357,135 @@ async function google(browser) {
   await b.ctx.close()
 }
 
+// The real backend (worker + database) run locally: sync between devices and a board shared between two people
+async function cloud(browser) {
+  console.log('\nAccounts, sync and shared boards (local backend)')
+  const fs = require('fs'), os = require('os')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'plan-d1-'))
+  const root = path.join(__dirname, '..')
+  require('child_process').execSync(`npx wrangler d1 migrations apply plan --local --persist-to ${dir}`, { cwd: root, stdio: 'ignore' })
+  const server = spawn('npx', ['wrangler', 'dev', '--port', '8788', '--local', '--persist-to', dir], { cwd: root, stdio: 'ignore', detached: true })
+  const CLOUD = 'http://localhost:8788/'
+  try {
+    for (let i = 0; i < 40; i++) {
+      if (await fetch(CLOUD + 'api/health').then((r) => r.ok, () => false)) break
+      await new Promise((r) => setTimeout(r, 500))
+    }
+    const open = async (kind, hash = '') => {
+      const d = await start(browser, { permissions: ['clipboard-read', 'clipboard-write'] })
+      await d.ctx.addInitScript(() => delete Navigator.prototype.share)
+      await d.page.goto(CLOUD + hash)
+      if (kind) {
+        await d.page.locator('.starts button', { hasText: kind }).click()
+        await d.page.click('.welcome .btn.big')
+        await d.page.waitForSelector('[data-card]')
+      }
+      return d
+    }
+    const has = (page, text, sel = '[data-row]') => page.waitForFunction(([t, s]) => [...document.querySelectorAll(s)].some((e) => e.value === t), [text, sel], { timeout: 20000 }).then(() => true, () => false)
+    const wake = (page) => page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')))
+
+    // device A turns sync on
+    const a = await open('My life')
+    await a.page.locator('.t-today [data-row]').first().fill('Written on my phone')
+    await a.page.click('[aria-label="Settings"]')
+    await a.page.locator('.btn', { hasText: 'Turn on sync' }).click()
+    await a.page.locator('.btn', { hasText: 'Add another device' }).click()
+    await a.page.waitForSelector('.code b')
+    const code = (await a.page.locator('.code b').innerText()).replace(/\s/g, '')
+    check('a device code is shown', /^[A-Z0-9]{8}$/.test(code), code)
+    await shot(a.page, 'cloud-code')
+    await a.page.keyboard.press('Escape')
+
+    // device B joins the same account with the code
+    const b = await open(null)
+    await b.page.locator('.btn', { hasText: 'I already use Plan' }).click()
+    await b.page.fill('.dialog input', code)
+    await b.page.keyboard.press('Enter')
+    await b.page.waitForSelector('[data-card]', { timeout: 20000 })
+    check('second device receives the board', await has(b.page, 'Written on my phone'))
+    check('with all of its cards', (await b.page.locator('[data-card]').count()) === (await a.page.locator('[data-card]').count()))
+    await b.page.locator('.t-today [data-row]').nth(1).fill('Added on my tablet')
+    await b.page.waitForTimeout(2500)
+    await wake(a.page)
+    check('a change on the tablet reaches the phone', await has(a.page, 'Added on my tablet'))
+
+    // photos travel too
+    const png = await a.page.evaluate(() => {
+      const cv = document.createElement('canvas')
+      cv.width = cv.height = 60
+      const g = cv.getContext('2d')
+      g.fillStyle = '#e0522b'
+      g.fillRect(0, 0, 60, 60)
+      return cv.toDataURL('image/png').split(',')[1]
+    })
+    await a.page.locator('.t-photo input[type=file]').setInputFiles({ name: 'p.png', mimeType: 'image/png', buffer: Buffer.from(png, 'base64') })
+    await a.page.waitForSelector('.t-photo .photo img')
+    await a.page.waitForTimeout(2500)
+    await wake(b.page)
+    check('a photo reaches the other device', await b.page.waitForSelector('.t-photo .photo img', { timeout: 20000 }).then(async (el) => (await el.getAttribute('src')).startsWith('data:image/'), () => false))
+
+    // A makes a second board and shares only that one
+    await a.page.click('.boardname')
+    await a.page.locator('.menu button', { hasText: 'New board' }).click()
+    await a.page.fill('.newboard input', 'Home')
+    await a.page.locator('.newboard .starts button', { hasText: 'Home and family' }).click()
+    await a.page.click('.newboard .btn.big')
+    await a.page.waitForTimeout(600)
+    await a.page.locator('.t-shopping [data-row]').first().fill('Oat milk')
+    await a.page.click('.boardname')
+    await a.page.locator('.menu button', { hasText: 'Share board' }).click()
+    await a.page.locator('.btn', { hasText: 'Invite someone' }).click()
+    await a.page.waitForSelector('.toast')
+    const link = await a.page.evaluate(() => navigator.clipboard.readText())
+    check('an invitation link is made', /#join=[\w-]+$/.test(link), link)
+    await a.page.keyboard.press('Escape')
+
+    // a different person opens the link on a brand-new device
+    const c = await open(null, link.slice(link.indexOf('#')))
+    await c.page.waitForSelector('[data-card]', { timeout: 20000 })
+    check('the invited person gets the shared board', (await c.page.locator('.boardname span').innerText()) === 'Home' && (await has(c.page, 'Oat milk')))
+    await c.page.click('.boardname')
+    const theirs = await c.page.locator('.menu button').allInnerTexts()
+    check('and none of the private boards', !theirs.some((t) => t.includes('My board')), theirs.join(' | '))
+    await c.page.keyboard.press('Escape')
+    await c.page.locator('.t-shopping [data-row]').nth(1).fill('Bread, from your partner')
+    await c.page.locator('.t-shopping .check').first().click()
+    await c.page.waitForTimeout(2500)
+    await wake(a.page)
+    check('their change appears for the owner', await has(a.page, 'Bread, from your partner'))
+    check('including a ticked item', await a.page.waitForFunction(() => document.querySelector('.t-shopping .check')?.getAttribute('aria-pressed') === 'true', null, { timeout: 10000 }).then(() => true, () => false))
+    await a.page.waitForFunction(() => !!document.querySelector('.boardname .shared'), null, { timeout: 20000 }).catch(() => {})
+    check('the board is marked as shared', (await a.page.locator('.boardname .shared').count()) === 1)
+
+    // both edit different lines of one card at the same moment: nothing is lost
+    await a.page.locator('.t-shopping [data-row]').nth(2).fill('Eggs (owner)')
+    await c.page.locator('.t-todo [data-row]').first().fill('Fix the gate (partner)')
+    await a.page.waitForTimeout(3000)
+    await wake(a.page); await wake(c.page)
+    check('simultaneous edits both survive', (await has(c.page, 'Eggs (owner)')) && (await has(a.page, 'Fix the gate (partner)')))
+
+    // deleting a shared board on one side only leaves it; the other person keeps it
+    await c.page.click('[aria-label="Settings"]')
+    check('the invited person has their own account', (await c.page.locator('.sync').count()) === 1)
+    await shot(c.page, 'cloud-settings')
+    // settle: no endless re-sending between devices
+    const revs = async () => JSON.stringify(await a.page.evaluate(() => localStorage.getItem('plan.cloud.revs')))
+    await a.page.waitForTimeout(4000)
+    const r1 = await revs()
+    await wake(a.page); await wake(b.page); await wake(c.page)
+    await a.page.waitForTimeout(5000)
+    await wake(a.page)
+    await a.page.waitForTimeout(3000)
+    check('devices settle and stop re-sending', r1 === (await revs()), `${r1} -> ${await revs()}`)
+    const errs = [...a.errors, ...b.errors, ...c.errors]
+    check('no errors', errs.length === 0, errs.join('; '))
+    await a.ctx.close(); await b.ctx.close(); await c.ctx.close()
+  } finally {
+    try { process.kill(-server.pid) } catch {}
+  }
+}
+
 async function phone(browser) {
   console.log('\nPhone')
   const { ctx, page, errors } = await start(browser, { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 })
@@ -405,7 +534,7 @@ async function phone(browser) {
   await new Promise((r) => setTimeout(r, 2500))
   const browser = await chromium.launch()
   const only = process.argv[2]
-  for (const [name, fn] of Object.entries({ core, palette, device, newDay, google, phone })) {
+  for (const [name, fn] of Object.entries({ core, palette, device, newDay, google, cloud, phone })) {
     if (only && only !== name) continue
     try {
       await fn(browser)

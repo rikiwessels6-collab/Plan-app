@@ -199,11 +199,16 @@ function stamp(prev: State, next: State): State {
   if (prev === next) return next
   const now = Date.now()
   const deleted = { ...next.deleted }
-  const track = <T extends { id: string }>(was: T[], is: T[], touch: (old: T | undefined, cur: T) => T): T[] => {
+  const deletedOn = { ...next.deletedOn }
+  const track = <T extends { id: string; boardId?: string }>(was: T[], is: T[], touch: (old: T | undefined, cur: T) => T): T[] => {
     if (was === is) return is
     const before = new Map(was.map((x) => [x.id, x]))
     const after = new Set(is.map((x) => x.id))
-    for (const x of was) if (!after.has(x.id)) deleted[x.id] = now
+    for (const x of was)
+      if (!after.has(x.id)) {
+        deleted[x.id] = now
+        if (x.boardId) deletedOn[x.id] = x.boardId
+      }
     return is.map((x) => {
       const old = before.get(x.id)
       if (old === x) return x
@@ -220,9 +225,13 @@ function stamp(prev: State, next: State): State {
     if (old.spaceId !== c.spaceId) k['#s'] = now
     return { ...c, u: now, k }
   })
-  const boards = track(prev.boards, next.boards, (_o, x) => ({ ...x, u: now }))
+  // a board whose cards were added, removed or rearranged gets a new "arranged at" time
+  const seq = (st: State, id: string) => st.cards.filter((c) => c.boardId === id).map((c) => c.id).join()
+  const boards = track(prev.boards, next.boards, (_o, x) => ({ ...x, u: now })).map((b) =>
+    prev.cards !== next.cards && seq(prev, b.id) !== seq(next, b.id) ? { ...b, o: now } : b,
+  )
   const spaces = track(prev.spaces, next.spaces, (_o, x) => ({ ...x, u: now }))
-  return { ...next, cards, boards, spaces, deleted, updatedAt: now }
+  return { ...next, cards, boards, spaces, deleted, deletedOn, updatedAt: now }
 }
 
 /** Two versions of one card: take each part (title, space, each section) from whichever changed it last. */
@@ -260,51 +269,69 @@ const TOMBSTONE_LIFE = 180 * 24 * 60 * 60 * 1000
 export function merge(local: State, remote: State): State {
   const deleted: Record<string, number> = { ...remote.deleted }
   for (const [id, at] of Object.entries(local.deleted ?? {})) deleted[id] = Math.max(at, deleted[id] ?? 0)
+  const deletedOn = { ...remote.deletedOn, ...local.deletedOn }
   const cutoff = Date.now() - TOMBSTONE_LIFE
-  for (const [id, at] of Object.entries(deleted)) if (at < cutoff) delete deleted[id]
+  for (const [id, at] of Object.entries(deleted)) if (at < cutoff) (delete deleted[id], delete deletedOn[id])
   const gone = (x: { id: string; u?: number }) => x.id in deleted && deleted[x.id] >= (x.u ?? 0)
 
+  // 1. every card that survives, in its newest (or combined) version
   const L = new Map(local.cards.map((c) => [c.id, c]))
   const R = new Map(remote.cards.map((c) => [c.id, c]))
-  const pick = (id: string): Card | null => {
+  const alive = new Map<string, Card>()
+  for (const id of new Set([...L.keys(), ...R.keys()])) {
     const l = L.get(id), r = R.get(id)
     const c = !l ? r! : !r ? l : mergeCard(l, r)
-    return gone(c) ? null : c
+    if (!gone(c)) alive.set(id, c)
   }
-  const localNewer = (local.updatedAt ?? 0) >= (remote.updatedAt ?? 0)
-  const lead = localNewer ? local : remote
-  const other = localNewer ? remote : local
-  // order follows the most recently changed copy; cards only the other copy has slot in after their old neighbour
-  const ids = lead.cards.map((c) => c.id)
-  const seen = new Set(ids)
-  let anchor = -1
-  for (const c of other.cards) {
-    const at = ids.indexOf(c.id)
-    if (at >= 0) anchor = at
-    else if (!seen.has(c.id)) {
-      ids.splice(++anchor, 0, c.id)
-      seen.add(c.id)
-    }
-  }
-  let cards = ids.map(pick).filter((c): c is Card => !!c)
+  const usedBoards = new Set([...alive.values()].map((c) => c.boardId))
+  const usedSpaces = new Set([...alive.values()].map((c) => c.spaceId))
 
-  // boards and spaces: newest version of each; one is only dropped if it was deleted after its last change,
-  // and never while a surviving card still sits on it
-  const list = <T extends { id: string; u?: number }>(a: T[], b: T[], used: (id: string) => boolean): T[] => {
+  // 2. boards and spaces: newest version of each, in this device's own order. One is only dropped if it was
+  // deleted after its last change, and never while a surviving card still sits on it.
+  const list = <T extends { id: string; u?: number }>(a: T[], b: T[], used: Set<string | undefined>): T[] => {
     const B = new Map(b.map((x) => [x.id, x]))
     const out: T[] = []
     for (const x of a) {
       const o = B.get(x.id)
       const w = o && (o.u ?? 0) > (x.u ?? 0) ? o : x
-      if (!gone(w) || used(w.id)) out.push(w)
+      if (!gone(w) || used.has(w.id)) out.push(w)
     }
-    for (const o of b) if (!a.some((x) => x.id === o.id) && (!gone(o) || used(o.id))) out.push(o)
-    for (const x of out) if (gone(x)) delete deleted[x.id]
+    for (const o of b) if (!a.some((x) => x.id === o.id) && (!gone(o) || used.has(o.id))) out.push(o)
+    for (const x of out) if (gone(x)) (delete deleted[x.id], delete deletedOn[x.id])
     return out
   }
-  let boards = list(lead.boards, other.boards, (id) => cards.some((c) => c.boardId === id))
+  const LB = new Map(local.boards.map((b) => [b.id, b]))
+  const RB = new Map(remote.boards.map((b) => [b.id, b]))
+  let boards = list(local.boards, remote.boards, usedBoards).map((b) => {
+    const o = Math.max(LB.get(b.id)?.o ?? 0, RB.get(b.id)?.o ?? 0)
+    return (b.o ?? 0) === o ? b : { ...b, o }
+  })
   if (!boards.length) boards = [local.boards[0]]
-  const spaces = list(lead.spaces, other.spaces, (id) => cards.some((c) => c.spaceId === id))
+  const spaces = list(local.spaces, remote.spaces, usedSpaces)
+
+  // 3. the order of cards on each board comes from whichever copy arranged that board last;
+  // cards only the other copy has slot in after their old neighbour
+  const arranged = new Map<string, string[]>()
+  for (const id of usedBoards) {
+    const remoteLeads = RB.has(id) && (!LB.has(id) || (RB.get(id)!.o ?? 0) > (LB.get(id)!.o ?? 0))
+    const on = (s: State) => s.cards.filter((c) => alive.get(c.id)?.boardId === id).map((c) => c.id)
+    const ids = on(remoteLeads ? remote : local)
+    const have = new Set(ids)
+    let anchor = -1
+    for (const cid of on(remoteLeads ? local : remote)) {
+      const at = ids.indexOf(cid)
+      if (at >= 0) anchor = at
+      else if (!have.has(cid)) (ids.splice(++anchor, 0, cid), have.add(cid))
+    }
+    arranged.set(id, ids)
+  }
+  // keep this device's interleaving of boards in the one list: each position keeps its board, and takes that board's next card
+  let cards: Card[] = []
+  for (const c of local.cards) {
+    const next = arranged.get((alive.get(c.id) ?? c).boardId)?.shift()
+    if (next) cards.push(alive.get(next)!)
+  }
+  for (const ids of arranged.values()) for (const id of ids) cards.push(alive.get(id)!)
 
   // keep the same arrays when nothing in them changed, so the screen does not redraw for nothing
   const keep = <T,>(mine: T[], out: T[]) => (out.length === mine.length && out.every((x, i) => x === mine[i]) ? mine : out)
@@ -315,7 +342,7 @@ export function merge(local: State, remote: State): State {
   const sameDeleted = Object.keys(deleted).length === Object.keys(mineDeleted).length && Object.entries(deleted).every(([id, at]) => mineDeleted[id] === at)
   if (cards === local.cards && boards === local.boards && sp === local.spaces && sameDeleted) return local
   return {
-    boards, spaces: sp, cards, deleted,
+    boards, spaces: sp, cards, deleted, deletedOn,
     boardId: boards.some((b) => b.id === local.boardId) ? local.boardId : boards[0].id,
     cols: local.cols,
     updatedAt: Math.max(local.updatedAt ?? 0, remote.updatedAt ?? 0),
@@ -346,7 +373,32 @@ export function normalize(x: any): State | null {
     boardId: on.has(x.boardId) ? x.boardId : boards[0].id,
     cols: Math.max(1, Math.min(8, Math.round(num(x.cols) ?? 4))),
     deleted: x.deleted && typeof x.deleted === 'object' ? Object.fromEntries(Object.entries(x.deleted).filter(([, v]) => num(v) !== undefined)) as Record<string, number> : undefined,
+    deletedOn: x.deletedOn && typeof x.deletedOn === 'object' ? Object.fromEntries(Object.entries(x.deletedOn).filter(([, v]) => typeof v === 'string')) as Record<string, string> : undefined,
     updatedAt: num(x.updatedAt),
+  }
+}
+
+/**
+ * One board cut out of the whole, in the same shape as a full State, for storing or sharing on its own.
+ * A shared board carries only what belongs to it: its cards, the spaces they use, and deletions made on it.
+ * A private one also carries all of this person's spaces and older deletions, so their own devices stay identical.
+ */
+export function slice(s: State, boardId: string, shared: boolean): State | null {
+  const board = s.boards.find((b) => b.id === boardId)
+  if (!board) return null
+  const cards = s.cards.filter((c) => c.boardId === boardId)
+  const used = new Set(cards.map((c) => c.spaceId))
+  const deleted: Record<string, number> = {}
+  const deletedOn: Record<string, string> = {}
+  for (const [id, at] of Object.entries(s.deleted ?? {})) {
+    const on = s.deletedOn?.[id]
+    if (on === boardId) (deleted[id] = at), (deletedOn[id] = on)
+    else if (!on && !shared && id !== boardId && !s.boards.some((b) => b.id === id)) deleted[id] = at
+  }
+  return {
+    boards: [board], boardId, cols: s.cols, cards, deleted, deletedOn,
+    spaces: shared ? s.spaces.filter((p) => used.has(p.id)) : s.spaces,
+    updatedAt: Math.max(board.u ?? 0, ...cards.map((c) => c.u ?? 0)),
   }
 }
 

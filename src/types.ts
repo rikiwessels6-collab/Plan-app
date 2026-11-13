@@ -56,6 +56,8 @@ export interface Board {
   id: string
   name: string
   u?: number
+  /** when the order of this board's cards last changed; the most recent arrangement wins when two copies meet */
+  o?: number
 }
 
 export interface State {
@@ -66,6 +68,8 @@ export interface State {
   cols: number
   /** when each deleted card, board or space was deleted, so a sync does not bring it back */
   deleted?: Record<string, number>
+  /** which board each deleted card belonged to, so a deletion is only ever sent to the people who share that board */
+  deletedOn?: Record<string, string>
   updatedAt?: number
 }
 

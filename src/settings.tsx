@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import { canInstall, install, isIOS, isStandalone, saveFile } from './device'
+import { createAccount, linkCode, redeem, setName, signOut, useCloud } from './cloud'
 import { connect, disconnect, reconnect, setClientId, useGoogle } from './google'
 import { Icon } from './sections'
 import { normalize, useApp } from './store'
@@ -22,11 +23,70 @@ const ago = (at?: number) => {
   return m < 1 ? 'just now' : m === 1 ? 'a minute ago' : m < 60 ? `${m} minutes ago` : new Date(at).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
 }
 
+/** Sync and sharing through the app's own backend. */
+function PlanAccount() {
+  const c = useCloud()
+  const ui = useUI()
+  const [code, setCode] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [name, setNameDraft] = useState(c.account?.name ?? '')
+  const run = (p: Promise<unknown>) => {
+    setBusy(true)
+    setErr('')
+    p.catch((e) => setErr(e.message)).finally(() => setBusy(false))
+  }
+  const enter = async () => {
+    const typed = await ui.ask({ title: 'Enter the code', body: 'On your other device, open Settings and choose “Add another device”.', placeholder: '8 letters and numbers', cta: 'Connect' })
+    if (typed) run(redeem(typed).then(() => ui.toast('Connected. Your boards are on their way.')))
+  }
+  if (!c.account)
+    return (
+      <>
+        <h3>Sync and sharing</h3>
+        <p className="hint">Keep your boards the same on every device, and share a board with a partner or family. No email or password needed.</p>
+        <div className="btns">
+          <button className="btn" disabled={busy} onClick={() => run(createAccount().then(() => ui.toast('Sync is on')))}>Turn on sync</button>
+          <button className="btn soft" disabled={busy} onClick={enter}>I have a code from another device</button>
+        </div>
+        {err && <p className="err">{err}</p>}
+      </>
+    )
+  return (
+    <>
+      <h3>Sync and sharing</h3>
+      <p className={c.phase === 'error' ? 'err sync' : 'hint sync'} role="status">
+        <Icon name={c.phase === 'error' ? 'CloudOff' : c.phase === 'syncing' ? 'RefreshCw' : 'CloudCheck'} size={14} />
+        {c.phase === 'error' ? c.error : c.phase === 'syncing' ? 'Syncing…' : c.at ? `Synced ${ago(c.at)}` : 'Sync is on'}
+      </p>
+      <div className="field">
+        <input value={name} placeholder="Your name, shown to people you share with" aria-label="Your name" maxLength={60} onChange={(e) => setNameDraft(e.target.value)} />
+        <button className="btn soft" disabled={busy || name.trim() === (c.account.name ?? '')} onClick={() => run(setName(name.trim()).then(() => ui.toast('Name saved')))}>Save</button>
+      </div>
+      {code ? (
+        <div className="code" role="status">
+          <b>{code.slice(0, 4)} {code.slice(4)}</b>
+          <small>On the other device: Settings, then “I have a code from another device”. Works for 10 minutes.</small>
+        </div>
+      ) : (
+        <div className="btns">
+          <button className="btn soft" disabled={busy} onClick={() => run(linkCode().then(setCode))}><Icon name="Plus" size={14} /> Add another device</button>
+          <button className="btn soft" disabled={busy} onClick={async () => {
+            if (await ui.confirm({ title: 'Sign out of this device?', body: 'Your boards stay on this device but stop syncing. Other devices are not affected.', cta: 'Sign out', danger: true })) signOut()
+          }}>Sign out</button>
+        </div>
+      )}
+      {err && <p className="err">{err}</p>}
+    </>
+  )
+}
+
 export function Settings({ onClose }: { onClose: () => void }) {
   const { state, dispatch } = useApp()
   const ui = useUI()
   const g = useGoogle()
   const sync = useSyncStatus()
+  const cloud = useCloud()
   const [id, setId] = useState(g.clientId)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
@@ -90,6 +150,8 @@ export function Settings({ onClose }: { onClose: () => void }) {
           </>
         )}
 
+        {cloud.available && <PlanAccount />}
+
         <h3>Google accounts</h3>
         {g.accounts.map((a) => {
           const ok = g.live.some((l) => l.email === a.email)
@@ -116,7 +178,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
           </button>
         ) : (
           <p className="hint">
-            Gmail, Calendar and sync need a one-time Google setup (free, about five minutes). It gives you a
+            Gmail and Calendar need a one-time Google setup (free, about five minutes). It gives you a
             “client ID” to paste below; it stays on this device.
           </p>
         )}
@@ -129,7 +191,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
         </div>
         {err && <p className="err">{err}</p>}
 
-        {g.accounts.length > 0 && (
+        {g.accounts.length > 0 && !cloud.available && (
           <>
             <h3>Sync between devices</h3>
             <p className="hint">

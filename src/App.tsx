@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import { CATALOG, GROUPS, typeOf } from './catalog'
 import { chime, notify, saveFile, setBadge, shareCard } from './device'
+import { detect, fetchAll, invite, join, members, redeem, syncSoon, useCloud, useCloudSync } from './cloud'
 import { connect, reconnect, useGoogle } from './google'
 import { useCardDrag, useFlip } from './drag'
 import { Palette, type Command } from './palette'
@@ -111,8 +112,24 @@ function NewBoard({ onClose }: { onClose: () => void }) {
 function Welcome({ onStart, onLoad }: { onStart: (k: Starter) => void; onLoad: (s: State) => void }) {
   const [pick, setPick] = useState<Starter>('life')
   const g = useGoogle()
+  const cloud = useCloud()
   const ui = useUI()
   const [busy, setBusy] = useState(false)
+  // someone who already uses Plan: type the code from the other device and the boards arrive here
+  const withCode = async () => {
+    const code = await ui.ask({ title: 'Enter the code', body: 'On a device that already has your boards, open Settings and choose “Add another device”.', placeholder: '8 letters and numbers', cta: 'Connect' })
+    if (!code) return
+    setBusy(true)
+    try {
+      await redeem(code)
+      const all = await fetchAll()
+      if (all) onLoad(all)
+      else ui.toast('Connected, but that account has no boards yet')
+    } catch (e: any) {
+      ui.toast(e?.message || 'Could not connect')
+    }
+    setBusy(false)
+  }
   // someone who already uses Plan on another device: sign in and bring that board here
   const bring = async () => {
     setBusy(true)
@@ -137,7 +154,12 @@ function Welcome({ onStart, onLoad }: { onStart: (k: Starter) => void; onLoad: (
         <p>Tasks, notes, photos, money, mail and calendar side by side. Pick a starting point; you can change every card later.</p>
         <Starts pick={pick} setPick={setPick} />
         <button className="btn big" onClick={() => onStart(pick)}>Create my board</button>
-        {g.clientId && (
+        {cloud.available && (
+          <button className="btn soft big" disabled={busy} onClick={withCode}>
+            {busy ? 'Fetching your boards…' : 'I already use Plan on another device'}
+          </button>
+        )}
+        {g.clientId && !cloud.available && (
           <button className="btn soft big" disabled={busy} onClick={bring}>
             {busy ? 'Looking for your board…' : 'I already have a board: sync it here'}
           </button>
@@ -299,8 +321,9 @@ function CardSheet({ card, space, onClose, onDelete }: { card: Card; space?: Spa
   )
 }
 
-function BoardMenu({ onNew }: { onNew: () => void }) {
+function BoardMenu({ onNew, onShare }: { onNew: () => void; onShare: () => void }) {
   const { state, dispatch } = useApp()
+  const cloud = useCloud()
   const ui = useUI()
   const [open, setOpen] = useState(false)
   const btn = useRef<HTMLButtonElement>(null)
@@ -310,6 +333,7 @@ function BoardMenu({ onNew }: { onNew: () => void }) {
     <div className="menuwrap boardmenu">
       <button ref={btn} className="boardname" aria-expanded={open} aria-haspopup="menu" onClick={() => setOpen(!open)}>
         <span>{board.name}</span>
+        {(cloud.people[board.id] ?? 1) > 1 && <i className="shared" title="Shared board"><Icon name="Users" size={13} /></i>}
         <Icon name="ChevronDown" size={18} />
       </button>
       {open && (
@@ -327,6 +351,7 @@ function BoardMenu({ onNew }: { onNew: () => void }) {
             const name = await ui.ask({ title: 'Rename board', initial: board.name, cta: 'Rename' })
             if (name) dispatch({ t: 'renameBoard', name })
           }}><Icon name="Pencil" /> Rename</button>
+          {cloud.available && <button role="menuitem" onClick={() => (setOpen(false), onShare())}><Icon name="UserPlus" /> Share board</button>}
           {state.boards.length > 1 && (
             <button role="menuitem" className="danger" onClick={async () => {
               setOpen(false)
@@ -347,7 +372,72 @@ function BoardMenu({ onNew }: { onNew: () => void }) {
   )
 }
 
-type Overlay = null | 'picker' | 'settings' | 'palette' | 'newboard'
+/** Invite someone to this one board, and see who is on it. */
+function ShareBoard({ onClose }: { onClose: () => void }) {
+  const { state } = useApp()
+  const cloud = useCloud()
+  const ui = useUI()
+  const board = state.boards.find((b) => b.id === state.boardId)!
+  const [who, setWho] = useState<{ id: string; name: string; role: string }[] | null>(null)
+  const [me, setMe] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    if (!cloud.account) return
+    let off = false
+    const load = () => members(board.id).then((r) => !off && (setWho(r.members), setMe(r.me)), () => {})
+    load()
+    const iv = setInterval(load, 6000)
+    return () => {
+      off = true
+      clearInterval(iv)
+    }
+  }, [board.id, cloud.account])
+  const send = async () => {
+    setBusy(true)
+    try {
+      const url = await invite(board.id)
+      const text = `Join my “${board.name}” board on Plan`
+      if (navigator.share) await navigator.share({ title: text, text, url }).catch(() => {})
+      else {
+        await navigator.clipboard.writeText(url)
+        ui.toast('Invitation link copied')
+      }
+      syncSoon()
+    } catch (e: any) {
+      ui.toast(e?.message || 'Could not make an invitation')
+    }
+    setBusy(false)
+  }
+  return (
+    <Sheet title={`Share “${board.name}”`} onClose={onClose}>
+      <div className="sheet-body settings">
+        <p className="hint">
+          Anyone you invite can see and change everything on this board, and it stays up to date for all of you.
+          Your other boards stay private.
+        </p>
+        <button className="btn big" disabled={busy} onClick={send}><Icon name="UserPlus" size={16} /> {busy ? 'Making a link…' : 'Invite someone'}</button>
+        <p className="hint">The link works for a week. Send it by message or email.</p>
+        {who && who.length > 0 && (
+          <>
+            <h3>On this board</h3>
+            {who.map((p) => (
+              <div className="acct" key={p.id}>
+                <span className="avatar">{(p.name || '?')[0].toUpperCase()}</span>
+                <div>
+                  <b>{p.name || 'Someone without a name yet'}{p.id === me ? ' (you)' : ''}</b>
+                  <small>{p.role === 'owner' ? 'Started this board' : 'Can edit'}</small>
+                </div>
+              </div>
+            ))}
+            {!cloud.account?.name && <p className="hint">Add your name in Settings so others know who you are.</p>}
+          </>
+        )}
+      </div>
+    </Sheet>
+  )
+}
+
+type Overlay = null | 'picker' | 'settings' | 'palette' | 'newboard' | 'share'
 
 function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: (a: Action) => void; canUndo: boolean; canRedo: boolean }) {
   const ui = useUI()
@@ -362,6 +452,7 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
   stateRef.current = state
   const startDrag = useCardDrag(dispatch)
   useSync(state, dispatch)
+  useCloudSync(state, dispatch)
 
   useEffect(() => {
     const on = () => setScrolled(scrollY > 4)
@@ -584,7 +675,7 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
             <img src="./logo.svg" alt="" width="34" height="34" />
             <div>
               <small>{new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })}</small>
-              <BoardMenu onNew={() => setOverlay('newboard')} />
+              <BoardMenu onNew={() => setOverlay('newboard')} onShare={() => setOverlay('share')} />
             </div>
           </div>
           <div className="tools">
@@ -645,10 +736,36 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
       {overlay === 'picker' && <Picker onClose={close} onAdd={add} />}
       {overlay === 'settings' && <Settings onClose={close} />}
       {overlay === 'newboard' && <NewBoard onClose={close} />}
+      {overlay === 'share' && <ShareBoard onClose={close} />}
       {overlay === 'palette' && <Palette cards={onBoard} commands={commands} onClose={closePalette} onJump={jumpTo} onNew={add} onCapture={capture} />}
       {opened && <CardSheet card={opened} space={state.spaces.find((s) => s.id === opened.spaceId)} onClose={closeCard} onDelete={onDelete} />}
     </Ctx.Provider>
   )
+}
+
+/** Opening an invitation link (…#join=…) adds that shared board to this device. */
+function Invited({ hasBoard, onLoad }: { hasBoard: boolean; onLoad: (s: State) => void }) {
+  const cloud = useCloud()
+  const ui = useUI()
+  const done = useRef(false)
+  useEffect(() => {
+    const token = /[#&]join=([A-Za-z0-9_-]+)/.exec(location.hash)?.[1]
+    if (!token || cloud.available !== true || done.current) return
+    done.current = true
+    history.replaceState(null, '', location.pathname + location.search)
+    join(token).then(
+      async () => {
+        if (hasBoard) syncSoon()
+        else {
+          const all = await fetchAll()
+          if (all) onLoad(all)
+        }
+        ui.toast('You have joined a shared board')
+      },
+      (e) => ui.toast(e?.message || 'That invitation could not be used'),
+    )
+  }, [cloud.available, hasBoard, onLoad, ui])
+  return null
 }
 
 const tabs = typeof BroadcastChannel === 'undefined' ? null : new BroadcastChannel('plan')
@@ -701,6 +818,7 @@ export default function App() {
     navigator.storage?.persist?.().catch(() => {})
   }, [state?.updatedAt])
 
+  useEffect(detect, [])
   if (ready === 'loading') return null
   if (ready === 'failed')
     return (
@@ -715,6 +833,7 @@ export default function App() {
     )
   return (
     <UIProvider>
+      <Invited hasBoard={!!state} onLoad={(s) => dispatch({ t: 'load', state: s })} />
       {!state ? (
         <Welcome onStart={(k) => dispatch({ t: 'load', state: starter(k) })} onLoad={(state) => dispatch({ t: 'load', state })} />
       ) : (
