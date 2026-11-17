@@ -1,6 +1,6 @@
 {
   // Plan: the app (static files in dist/) and its API (worker/index.ts) as one Cloudflare Worker.
-  "name": "plan",
+  "name": "plan-app",
   "main": "worker/index.ts",
   "compatibility_date": "2026-10-01",
   "assets": {
