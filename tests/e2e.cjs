@@ -399,7 +399,7 @@ async function cloud(browser) {
 
     // device B joins the same account with the code
     const b = await open(null)
-    await b.page.locator('.btn', { hasText: 'I already use Plan' }).click()
+    await b.page.locator('.btn', { hasText: 'I already use Plainsight' }).click()
     await b.page.fill('.dialog input', code)
     await b.page.keyboard.press('Enter')
     await b.page.waitForSelector('[data-card]', { timeout: 20000 })

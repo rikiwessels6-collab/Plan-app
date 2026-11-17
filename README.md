@@ -1,4 +1,4 @@
-# Plan
+# Plainsight
 
 One visual board for tasks, notes, photos, plans, money and people, with Gmail and Google Calendar on the same board.
 

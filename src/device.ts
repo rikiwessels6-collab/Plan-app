@@ -25,7 +25,7 @@ export function ics(items: { title: string; date: string }[], now = new Date()):
       'END:VEVENT',
     ].join('\r\n'),
   )
-  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Plan//Board//EN', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].join('\r\n') + '\r\n'
+  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Plainsight//Board//EN', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].join('\r\n') + '\r\n'
 }
 
 export function saveFile(name: string, type: string, body: string) {

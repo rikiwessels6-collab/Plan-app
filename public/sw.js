@@ -1,6 +1,6 @@
 // Offline cache. Pages: network first (so new versions appear), falling back to cache.
 // Built assets have hashed names, so cache first is safe for them.
-const CACHE = 'plan-v1'
+const CACHE = 'plainsight-v2'
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()))
 self.addEventListener('fetch', (e) => {

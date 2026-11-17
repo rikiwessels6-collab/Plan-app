@@ -1,4 +1,4 @@
-// The Plan account: sync between devices and shared boards, through the app's own backend (worker/index.ts).
+// The Plainsight account: sync between devices and shared boards, through the app's own backend (worker/index.ts).
 // There are no passwords. A device creates an account silently and holds a secret; another device joins
 // with a short code; another person joins one board with an invitation link.
 // Each board is stored as its own document, so sharing one board shares nothing else.

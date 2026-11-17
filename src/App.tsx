@@ -115,7 +115,7 @@ function Welcome({ onStart, onLoad }: { onStart: (k: Starter) => void; onLoad: (
   const cloud = useCloud()
   const ui = useUI()
   const [busy, setBusy] = useState(false)
-  // someone who already uses Plan: type the code from the other device and the boards arrive here
+  // someone who already uses Plainsight: type the code from the other device and the boards arrive here
   const withCode = async () => {
     const code = await ui.ask({ title: 'Enter the code', body: 'On a device that already has your boards, open Settings and choose “Add another device”.', placeholder: '8 letters and numbers', cta: 'Connect' })
     if (!code) return
@@ -130,7 +130,7 @@ function Welcome({ onStart, onLoad }: { onStart: (k: Starter) => void; onLoad: (
     }
     setBusy(false)
   }
-  // someone who already uses Plan on another device: sign in and bring that board here
+  // someone who already uses Plainsight on another device: sign in and bring that board here
   const bring = async () => {
     setBusy(true)
     try {
@@ -156,7 +156,7 @@ function Welcome({ onStart, onLoad }: { onStart: (k: Starter) => void; onLoad: (
         <button className="btn big" onClick={() => onStart(pick)}>Create my board</button>
         {cloud.available && (
           <button className="btn soft big" disabled={busy} onClick={withCode}>
-            {busy ? 'Fetching your boards…' : 'I already use Plan on another device'}
+            {busy ? 'Fetching your boards…' : 'I already use Plainsight on another device'}
           </button>
         )}
         {g.clientId && !cloud.available && (
@@ -229,7 +229,7 @@ const CardView = memo(function CardView({ card, index, spaces, onOpen, onDelete,
     >
       <header onPointerDown={(e) => startDrag(e, card.id)}>
         <button
-          className="badge" style={space ? { background: space.color, color: '#fff' } : undefined}
+          className="badge" style={space ? { background: space.color, color: 'var(--on-pastel)' } : undefined}
           aria-label={`Open ${card.title}`} title="Open" onClick={() => onOpen(card.id)}
         >
           <Icon name={type.icon} size={14} />
@@ -296,7 +296,7 @@ function CardSheet({ card, space, onClose, onDelete }: { card: Card; space?: Spa
       title={card.title} onClose={onClose} wide
       head={
         <div className="sheet-title">
-          <span className="badge" style={space ? { background: space.color, color: '#fff' } : undefined}><Icon name={type.icon} size={15} /></span>
+          <span className="badge" style={space ? { background: space.color, color: 'var(--on-pastel)' } : undefined}><Icon name={type.icon} size={15} /></span>
           <input
             className="title" value={card.title} aria-label="Card title" placeholder="Untitled"
             onChange={(e) => dispatch({ t: 'patchCard', id: card.id, patch: { title: e.target.value } })}
@@ -396,7 +396,7 @@ function ShareBoard({ onClose }: { onClose: () => void }) {
     setBusy(true)
     try {
       const url = await invite(board.id)
-      const text = `Join my “${board.name}” board on Plan`
+      const text = `Join my “${board.name}” board on Plainsight`
       if (navigator.share) await navigator.share({ title: text, text, url }).catch(() => {})
       else {
         await navigator.clipboard.writeText(url)
@@ -826,7 +826,7 @@ export default function App() {
         <div>
           <img src="./logo.svg" alt="" width="56" height="56" />
           <h1>Your board could not be opened.</h1>
-          <p>This device’s storage did not respond. Nothing has been changed. Close other tabs with Plan open, then try again.</p>
+          <p>This device’s storage did not respond. Nothing has been changed. Close other tabs with Plainsight open, then try again.</p>
           <button className="btn big" onClick={() => location.reload()}>Try again</button>
         </div>
       </main>
@@ -844,7 +844,7 @@ export default function App() {
               <h1>Something went wrong.</h1>
               <p>Your board is still saved on this device. You can download a copy before trying again.</p>
               <button className="btn big" onClick={retry}>Try again</button>
-              <button className="btn soft big" onClick={() => saveFile('plan-backup.json', 'application/json', JSON.stringify(state))}>Download my board</button>
+              <button className="btn soft big" onClick={() => saveFile('plainsight-backup.json', 'application/json', JSON.stringify(state))}>Download my board</button>
             </div>
           </main>
         )}>

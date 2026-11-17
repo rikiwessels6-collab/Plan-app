@@ -13,7 +13,7 @@ export function applyTheme(t: Theme) {
   if (t === 'system') delete document.documentElement.dataset.theme
   else document.documentElement.dataset.theme = t
   const dark = t === 'dark' || (t === 'system' && matchMedia('(prefers-color-scheme: dark)').matches)
-  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#151412' : '#f3f0e8')
+  document.querySelector('meta[name=theme-color]')?.setAttribute('content', dark ? '#16141b' : '#f6f3f9')
 }
 export const savedTheme = () => (localStorage.getItem('plan.theme') as Theme | null) ?? 'system'
 
@@ -111,7 +111,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
     try {
       backup = normalize(JSON.parse(await f.text()))
     } catch {}
-    if (!backup) return setErr('That file is not a Plan backup.')
+    if (!backup) return setErr('That file is not a Plainsight backup.')
     setErr('')
     const n = backup.cards.length
     if (await ui.confirm({
@@ -141,11 +141,11 @@ export function Settings({ onClose }: { onClose: () => void }) {
             <h3>Install</h3>
             {isIOS() ? (
               <p className="hint">
-                In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>. Plan then opens full screen like any app, works
+                In Safari, tap <b>Share</b>, then <b>Add to Home Screen</b>. Plainsight then opens full screen like any app, works
                 offline, and its icon shows how many things are due today.
               </p>
             ) : (
-              <button className="btn" onClick={() => install().then(() => bump((n) => n + 1))}><Icon name="Download" size={14} /> Install Plan</button>
+              <button className="btn" onClick={() => install().then(() => bump((n) => n + 1))}><Icon name="Download" size={14} /> Install Plainsight</button>
             )}
           </>
         )}
@@ -216,7 +216,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
         <h3>Your data</h3>
         <p className="hint">Everything is saved on this device. Download a backup to keep a copy or move it.</p>
         <div className="btns">
-          <button className="btn soft" onClick={() => (saveFile('plan-backup.json', 'application/json', JSON.stringify(state)), ui.toast('Backup downloaded'))}>
+          <button className="btn soft" onClick={() => (saveFile('plainsight-backup.json', 'application/json', JSON.stringify(state)), ui.toast('Backup downloaded'))}>
             <Icon name="Download" size={14} /> Download backup
           </button>
           <button className="btn soft" onClick={() => file.current?.click()}><Icon name="Upload" size={14} /> Restore backup</button>

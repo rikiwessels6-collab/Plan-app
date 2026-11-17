@@ -75,4 +75,7 @@ export interface State {
 
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
 
-export const SPACE_COLORS = ['#5b8c5a', '#c8763a', '#4a7fa7', '#8a5a9c', '#c9a227', '#b8505a', '#3f8f8a']
+// pastels: mint, peach, sky, lilac, butter, rose, aqua (badges show dark icons on them)
+export const SPACE_COLORS = ['#b9dcc0', '#f6c3a8', '#b7d3ef', '#d4c6f2', '#f3df9a', '#f2b8c6', '#a9dcd6']
+/** colours used before the pastel palette, in the same order, so saved spaces keep their identity */
+export const OLD_SPACE_COLORS = ['#5b8c5a', '#c8763a', '#4a7fa7', '#8a5a9c', '#c9a227', '#b8505a', '#3f8f8a']

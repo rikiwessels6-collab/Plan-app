@@ -1,6 +1,6 @@
 import { createContext, useContext } from 'react'
 import { typeOf } from './catalog'
-import { SPACE_COLORS, uid, type Board, type Card, type State } from './types'
+import { OLD_SPACE_COLORS, SPACE_COLORS, uid, type Board, type Card, type State } from './types'
 
 export type Action =
   | { t: 'load'; state: State }
@@ -359,7 +359,7 @@ export function normalize(x: any): State | null {
   const on = new Set(boards.map((b) => b.id))
   const spaces = (Array.isArray(x.spaces) ? x.spaces : [])
     .filter((p: any) => p && typeof p.id === 'string')
-    .map((p: any) => ({ ...p, name: typeof p.name === 'string' ? p.name : '', color: typeof p.color === 'string' ? p.color : SPACE_COLORS[0] }))
+    .map((p: any) => ({ ...p, name: typeof p.name === 'string' ? p.name : '', color: typeof p.color === 'string' ? (SPACE_COLORS[OLD_SPACE_COLORS.indexOf(p.color.toLowerCase())] ?? p.color) : SPACE_COLORS[0] }))
   const cards: Card[] = x.cards
     .filter((c: any) => c && typeof c.id === 'string' && typeof c.type === 'string' && on.has(c.boardId))
     .map((c: any) => ({
