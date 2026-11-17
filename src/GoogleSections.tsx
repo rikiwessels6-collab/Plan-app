@@ -7,6 +7,8 @@ function Gate({ stale }: { stale: Account[] }) {
   const { openSettings } = useApp()
   const g = useGoogle()
   const [err, setErr] = useState('')
+  if ((window as any).Capacitor?.isNativePlatform?.())
+    return <p className="hint">Gmail and Calendar work on the Plainsight website for now. They are coming to the app in an update.</p>
   if (!g.accounts.length)
     return (
       <div className="gate">

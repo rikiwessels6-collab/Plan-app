@@ -56,6 +56,8 @@ export function starter(kind: Starter): State {
     : kind === 'life'
       ? [c('today', 0), c('agenda', 2), c('habit', 0, 'Daily habit'), hello, c('goal', 0), c('meals', 1), c('gmail', 2), c('shopping', 1), c('budget', 3), c('dates', 0), c('journal', 0), c('photo')]
       : [hello]
+  const native = typeof window !== 'undefined' && !!(window as any).Capacitor?.isNativePlatform?.()
+  if (native) for (let i = cards.length - 1; i >= 0; i--) if (cards[i].type === 'gmail' || cards[i].type === 'agenda') cards.splice(i, 1)
   return {
     boards: [{ id: b, name: kind === 'work' ? 'Work' : kind === 'home' ? 'Home' : 'My board' }],
     // phones show as many columns as fit; tablets start roomier than a desktop

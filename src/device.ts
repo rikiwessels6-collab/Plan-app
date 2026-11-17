@@ -28,7 +28,24 @@ export function ics(items: { title: string; date: string }[], now = new Date()):
   return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Plainsight//Board//EN', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].join('\r\n') + '\r\n'
 }
 
-export function saveFile(name: string, type: string, body: string) {
+/** True inside the iPhone and iPad app (as opposed to the website). */
+export const isNative = () => !!(window as any).Capacitor?.isNativePlatform?.()
+
+/**
+ * Hand a file to the person. On the web it downloads; in the app, where downloads do nothing,
+ * it opens the share sheet so they can save it to Files, add it to Calendar, or send it on.
+ */
+export async function saveFile(name: string, type: string, body: string) {
+  if (isNative()) {
+    try {
+      const [{ Filesystem, Directory, Encoding }, { Share }] = await Promise.all([import('@capacitor/filesystem'), import('@capacitor/share')])
+      const { uri } = await Filesystem.writeFile({ path: name, data: body, directory: Directory.Cache, encoding: Encoding.UTF8 })
+      await Share.share({ title: name, url: uri })
+    } catch {
+      /* closing the share sheet is not an error */
+    }
+    return
+  }
   const a = document.createElement('a')
   a.href = URL.createObjectURL(new Blob([body], { type }))
   a.download = name
@@ -133,6 +150,15 @@ export function cardText(card: Card): string {
 
 export async function shareCard(card: Card): Promise<'shared' | 'copied' | 'failed' | 'cancelled'> {
   const text = cardText(card)
+  if (isNative()) {
+    try {
+      const { Share } = await import('@capacitor/share')
+      await Share.share({ title: card.title, text })
+      return 'shared'
+    } catch {
+      return 'cancelled'
+    }
+  }
   if (navigator.share) {
     try {
       await navigator.share({ title: card.title, text })

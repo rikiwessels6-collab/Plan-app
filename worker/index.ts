@@ -79,6 +79,27 @@ async function api(req: Request, env: Env, path: string[]): Promise<Response> {
     await env.DB.prepare('INSERT INTO links (code, user_id, expires) VALUES (?, ?, ?)').bind(c, user, now + 10 * 60 * 1000).run()
     return json({ code: c, expires: now + 10 * 60 * 1000 })
   }
+  if (path[0] === 'account' && method === 'DELETE') {
+    // Delete the account and everything stored for it. Boards shared with others stay with them;
+    // boards only this person could open are removed with their photos and invitations.
+    const { results } = await env.DB.prepare(
+      'SELECT m.doc_id FROM members m WHERE m.user_id = ? AND (SELECT COUNT(*) FROM members x WHERE x.doc_id = m.doc_id) = 1',
+    ).bind(user).all<{ doc_id: string }>()
+    const solo = results.map((r) => r.doc_id)
+    await env.DB.batch([
+      ...solo.flatMap((id) => [
+        env.DB.prepare('DELETE FROM docs WHERE id = ?').bind(id),
+        env.DB.prepare('DELETE FROM blobs WHERE doc_id = ?').bind(id),
+        env.DB.prepare('DELETE FROM invites WHERE doc_id = ?').bind(id),
+      ]),
+      env.DB.prepare('DELETE FROM members WHERE user_id = ?').bind(user),
+      env.DB.prepare('DELETE FROM invites WHERE created_by = ?').bind(user),
+      env.DB.prepare('DELETE FROM links WHERE user_id = ?').bind(user),
+      env.DB.prepare('DELETE FROM keys WHERE user_id = ?').bind(user),
+      env.DB.prepare('DELETE FROM users WHERE id = ?').bind(user),
+    ])
+    return json({ ok: true, boardsRemoved: solo.length })
+  }
   if (path[0] === 'signout' && method === 'POST') {
     const m = /\.([A-Za-z0-9_-]+)$/.exec(req.headers.get('authorization') ?? '')!
     await env.DB.prepare('DELETE FROM keys WHERE hash = ?').bind(await sha(m[1])).run()
@@ -175,16 +196,32 @@ async function api(req: Request, env: Env, path: string[]): Promise<Response> {
   return fail(404, 'Not found')
 }
 
+// The iPhone and iPad app runs from its own origin and calls this API across origins.
+// Requests carry a bearer key, not cookies, so allowing these origins exposes nothing extra.
+const APP_ORIGINS = new Set(['capacitor://localhost', 'ionic://localhost', 'http://localhost', 'https://localhost'])
+function cors(req: Request, res: Response): Response {
+  const origin = req.headers.get('origin')
+  if (!origin || !APP_ORIGINS.has(origin)) return res
+  const out = new Response(res.body, res)
+  out.headers.set('access-control-allow-origin', origin)
+  out.headers.set('access-control-allow-headers', 'authorization, content-type')
+  out.headers.set('access-control-allow-methods', 'GET, POST, PUT, DELETE, OPTIONS')
+  out.headers.set('access-control-max-age', '86400')
+  out.headers.append('vary', 'origin')
+  return out
+}
+
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url)
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(req)
+    if (req.method === 'OPTIONS') return cors(req, new Response(null, { status: 204 }))
     try {
-      return await api(req, env, url.pathname.slice(5).split('/').filter(Boolean))
+      return cors(req, await api(req, env, url.pathname.slice(5).split('/').filter(Boolean)))
     } catch (e) {
-      if (e instanceof Response) return e
+      if (e instanceof Response) return cors(req, e)
       console.error(e)
-      return fail(500, 'Something went wrong on the server')
+      return cors(req, fail(500, 'Something went wrong on the server'))
     }
   },
 }

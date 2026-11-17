@@ -118,4 +118,10 @@ export const CATALOG: CardType[] = [
   { id: 'agenda', name: 'Calendar', group: 'Google', icon: 'CalendarClock', sections: [{ kind: 'agenda', key: 'cal', days: 7 }] },
 ]
 
+/** Cards that need Google sign-in, which Google does not allow inside apps like ours yet. */
+export const WEB_ONLY = new Set(['gmail', 'agenda'])
+const native = () => typeof window !== 'undefined' && !!(window as any).Capacitor?.isNativePlatform?.()
+/** The cards on offer here: all of them on the web, all but the Google ones in the app. */
+export const available = () => (native() ? CATALOG.filter((t) => !WEB_ONLY.has(t.id)) : CATALOG)
+
 export const typeOf = (id: string): CardType => CATALOG.find((t) => t.id === id) ?? CATALOG[2]

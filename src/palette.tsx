@@ -1,6 +1,6 @@
 // One box for everything: jump to a card, capture a thought into a list, make a new card, run a command.
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CATALOG, typeOf } from './catalog'
+import { available, typeOf } from './catalog'
 import { Icon } from './sections'
 import type { Card } from './types'
 
@@ -48,7 +48,7 @@ export function Palette({ cards, commands, onClose, onJump, onNew, onCapture }: 
       }),
     )
     cards.filter((c) => text(c).includes(n)).slice(0, 6).forEach((c) => out.push(jump(c)))
-    CATALOG.filter((t) => t.name.toLowerCase().includes(n)).slice(0, 5).forEach((t) =>
+    available().filter((t) => t.name.toLowerCase().includes(n)).slice(0, 5).forEach((t) =>
       out.push({ key: 't' + t.id, icon: t.icon, label: t.name, hint: 'New card', group: 'Create', run: () => onNew(t.id) }),
     )
     commands.filter((c) => c.name.toLowerCase().includes(n)).forEach((c) => out.push({ key: 'c' + c.name, icon: c.icon, label: c.name, hint: c.hint, group: 'Actions', run: c.run }))

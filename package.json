@@ -12,6 +12,10 @@
     "icons": "sh scripts/icons.sh"
   },
   "dependencies": {
+    "@capacitor/core": "^8.6.2",
+    "@capacitor/filesystem": "^8.1.5",
+    "@capacitor/ios": "^8.6.2",
+    "@capacitor/share": "^8.0.3",
     "@fontsource-variable/fraunces": "^5.3.0",
     "@fontsource-variable/geist": "^5.3.0",
     "lucide-react": "^1.72.0",
@@ -19,6 +23,7 @@
     "react-dom": "^19.3.1"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.2",
     "@cloudflare/workers-types": "^5.20261113.1",
     "@types/react": "^19.3.0",
     "@types/react-dom": "^19.3.0",

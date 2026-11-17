@@ -19,6 +19,13 @@ export interface CloudStatus {
   nudge: number
 }
 
+// The app inside the iPhone/iPad wrapper has no web address of its own, so it is built with the
+// address of the live site (VITE_PUBLIC_URL) and sends its requests there.
+const BASE = ((import.meta.env.VITE_PUBLIC_URL as string | undefined) ?? '').replace(/\/?$/, '/')
+const api = (path: string) => (BASE.length > 1 ? `${BASE}api/${path}` : `./api/${path}`)
+/** Where invitation links should point: the live site, not wherever this copy happens to run. */
+const site = () => (BASE.length > 1 ? BASE : `${location.origin}${location.pathname}`)
+
 const K = 'plan.cloud'
 const K_REV = 'plan.cloud.revs'
 const read = <T,>(k: string, d: T): T => {
@@ -57,7 +64,7 @@ class ApiError extends Error {
   }
 }
 async function call(path: string, init: RequestInit & { raw?: boolean } = {}, acc: Account | null = status.account): Promise<any> {
-  const r = await fetch(`./api/${path}`, {
+  const r = await fetch(api(path), {
     ...init,
     headers: { ...(acc ? { authorization: `Bearer ${acc.userId}.${acc.key}` } : null), ...init.headers },
   })
@@ -73,7 +80,7 @@ async function call(path: string, init: RequestInit & { raw?: boolean } = {}, ac
 /** Find out once whether this copy of the app is served with its backend. */
 export function detect() {
   if (status.available !== null) return
-  fetch('./api/health').then((r) => r.json()).then((j) => set({ available: j?.ok === true }), () => set({ available: false }))
+  fetch(api('health')).then((r) => r.json()).then((j) => set({ available: j?.ok === true }), () => set({ available: false }))
 }
 
 function adopt(acc: Account) {
@@ -97,6 +104,11 @@ export async function redeem(code: string): Promise<void> {
   adopt(acc)
   call('me').then((me) => me?.name && adopt({ ...acc, name: me.name }), () => {})
 }
+/** Delete this account and everything stored for it on the server. Boards stay on this device. */
+export async function deleteAccount() {
+  await call('account', { method: 'DELETE' })
+  signOut(true)
+}
 export function signOut(silent = false) {
   if (!silent && status.account) call('signout', { method: 'POST' }).catch(() => {})
   localStorage.removeItem(K)
@@ -111,7 +123,7 @@ export async function invite(boardId: string): Promise<string> {
   await ensureAccount()
   for (let i = 0; ; i++) {
     try {
-      return `${location.origin}${location.pathname}#join=${(await call(`docs/${boardId}/invite`, { method: 'POST' })).token}`
+      return `${site()}#join=${(await call(`docs/${boardId}/invite`, { method: 'POST' })).token}`
     } catch (e) {
       // the board may not have reached the server yet: ask for a sync and try again shortly
       if (!(e instanceof ApiError) || e.status !== 404 || i >= 8) throw e

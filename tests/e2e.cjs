@@ -478,12 +478,53 @@ async function cloud(browser) {
     await wake(a.page)
     await a.page.waitForTimeout(3000)
     check('devices settle and stop re-sending', r1 === (await revs()), `${r1} -> ${await revs()}`)
+    // the iPhone/iPad app calls the API from its own origin
+    const pre = await fetch(CLOUD + 'api/health', { method: 'OPTIONS', headers: { origin: 'capacitor://localhost', 'access-control-request-method': 'GET' } })
+    check('the native app is allowed to call the API', pre.status === 204 && pre.headers.get('access-control-allow-origin') === 'capacitor://localhost')
+    const other = await fetch(CLOUD + 'api/health', { headers: { origin: 'https://evil.example' } })
+    check('other websites are not', !other.headers.get('access-control-allow-origin'))
+
+    // deleting an account (Apple requires this to be possible inside the app)
+    await c.page.locator('.linkish.danger', { hasText: 'Delete account' }).click()
+    await c.page.locator('.dialog .btn.danger').click()
+    await c.page.waitForSelector('.btn:has-text("Turn on sync")', { timeout: 10000 }).catch(() => {})
+    check('an account can be deleted', (await c.page.locator('.btn', { hasText: 'Turn on sync' }).count()) === 1)
+    check('its boards stay on that device', await has(c.page, 'Bread, from your partner'))
+    await c.page.keyboard.press('Escape')
+    await a.page.click('.boardname')
+    await a.page.locator('.menu button', { hasText: 'Share board' }).click()
+    await a.page.waitForTimeout(7000)
+    const listed = await a.page.locator('.acct b').allInnerTexts()
+    check('the deleted person no longer appears on the shared board', listed.length === 1, listed.join(' | '))
+    await a.page.keyboard.press('Escape')
+
     const errs = [...a.errors, ...b.errors, ...c.errors]
     check('no errors', errs.length === 0, errs.join('; '))
     await a.ctx.close(); await b.ctx.close(); await c.ctx.close()
   } finally {
     try { process.kill(-server.pid) } catch {}
   }
+}
+
+// The same app inside the iPhone/iPad wrapper (simulated): Google cards are left out, nothing breaks
+async function native(browser) {
+  console.log('\nInside the iPhone and iPad app')
+  const { ctx, page, errors } = await start(browser, { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true })
+  await ctx.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true, getPlatform: () => 'ios' } })
+  await begin(page, 'Work')
+  const types = await page.locator('[data-card]').evaluateAll((els) => els.map((e) => [...e.classList].find((c) => c.startsWith('t-'))))
+  check('starter boards leave out the Google cards', !types.includes('t-gmail') && !types.includes('t-agenda') && types.length > 5, types.join(' '))
+  await page.tap('.fab')
+  await page.fill('.sheet .search input', 'gmail')
+  check('the card picker does not offer them', (await page.locator('.tile').count()) === 0)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(300)
+  await page.tap('[aria-label="Settings"]')
+  const text = await page.locator('.settings').innerText()
+  check('Settings explains where Gmail and Calendar are', text.includes('work on the Plainsight website') && !text.includes('Paste client ID'))
+  check('and does not suggest adding to the home screen', !text.includes('Add to Home Screen'))
+  check('no errors', errors.length === 0, errors.join('; '))
+  await ctx.close()
 }
 
 async function phone(browser) {
@@ -534,7 +575,7 @@ async function phone(browser) {
   await new Promise((r) => setTimeout(r, 2500))
   const browser = await chromium.launch()
   const only = process.argv[2]
-  for (const [name, fn] of Object.entries({ core, palette, device, newDay, google, cloud, phone })) {
+  for (const [name, fn] of Object.entries({ core, palette, device, newDay, google, cloud, native, phone })) {
     if (only && only !== name) continue
     try {
       await fn(browser)

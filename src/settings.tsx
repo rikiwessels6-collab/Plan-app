@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react'
-import { canInstall, install, isIOS, isStandalone, saveFile } from './device'
-import { createAccount, linkCode, redeem, setName, signOut, useCloud } from './cloud'
+import { canInstall, install, isIOS, isNative, isStandalone, saveFile } from './device'
+import { createAccount, deleteAccount, linkCode, redeem, setName, signOut, useCloud } from './cloud'
 import { connect, disconnect, reconnect, setClientId, useGoogle } from './google'
 import { Icon } from './sections'
 import { normalize, useApp } from './store'
@@ -77,6 +77,13 @@ function PlanAccount() {
         </div>
       )}
       {err && <p className="err">{err}</p>}
+      <button className="linkish danger" disabled={busy} onClick={async () => {
+        if (await ui.confirm({
+          title: 'Delete your Plainsight account?',
+          body: 'This permanently removes your account and every board stored for it on our server. Boards you share with others stay with them. Your boards remain on this device. This cannot be undone.',
+          cta: 'Delete account', danger: true,
+        })) run(deleteAccount().then(() => ui.toast('Your account has been deleted')))
+      }}>Delete account</button>
     </>
   )
 }
@@ -136,7 +143,7 @@ export function Settings({ onClose }: { onClose: () => void }) {
           ))}
         </div>
 
-        {!isStandalone() && (isIOS() || canInstall()) && (
+        {!isNative() && !isStandalone() && (isIOS() || canInstall()) && (
           <>
             <h3>Install</h3>
             {isIOS() ? (
@@ -152,44 +159,53 @@ export function Settings({ onClose }: { onClose: () => void }) {
 
         {cloud.available && <PlanAccount />}
 
-        <h3>Google accounts</h3>
-        {g.accounts.map((a) => {
-          const ok = g.live.some((l) => l.email === a.email)
-          return (
-            <div className="acct" key={a.email}>
-              <span className="avatar">{a.email[0].toUpperCase()}</span>
-              <div>
-                <b>{a.email}</b>
-                <small>{ok ? 'Gmail and Calendar connected' : 'Session ended'}</small>
-              </div>
-              {!ok && <button className="btn soft" disabled={busy} onClick={() => run(reconnect(a.email))}>Reconnect</button>}
-              <button
-                className="ghost" aria-label={`Remove ${a.email}`}
-                onClick={() => (sync.account === a.email && setSyncAccount(''), disconnect(a.email))}
-              >
-                <Icon name="LogOut" />
-              </button>
-            </div>
-          )
-        })}
-        {g.clientId ? (
-          <button className="btn" disabled={busy} onClick={() => run(connect())}>
-            {busy ? 'Waiting for Google…' : g.accounts.length ? 'Add another account' : 'Connect Google account'}
-          </button>
+        {isNative() ? (
+          <>
+            <h3>Gmail and Calendar</h3>
+            <p className="hint">The Gmail and Calendar cards work on the Plainsight website for now. They are coming to the app in an update.</p>
+          </>
         ) : (
-          <p className="hint">
-            Gmail and Calendar need a one-time Google setup (free, about five minutes). It gives you a
-            “client ID” to paste below; it stays on this device.
-          </p>
+          <>
+        <h3>Google accounts</h3>
+          {g.accounts.map((a) => {
+            const ok = g.live.some((l) => l.email === a.email)
+            return (
+              <div className="acct" key={a.email}>
+                <span className="avatar">{a.email[0].toUpperCase()}</span>
+                <div>
+                  <b>{a.email}</b>
+                  <small>{ok ? 'Gmail and Calendar connected' : 'Session ended'}</small>
+                </div>
+                {!ok && <button className="btn soft" disabled={busy} onClick={() => run(reconnect(a.email))}>Reconnect</button>}
+                <button
+                  className="ghost" aria-label={`Remove ${a.email}`}
+                  onClick={() => (sync.account === a.email && setSyncAccount(''), disconnect(a.email))}
+                >
+                  <Icon name="LogOut" />
+                </button>
+              </div>
+            )
+          })}
+          {g.clientId ? (
+            <button className="btn" disabled={busy} onClick={() => run(connect())}>
+              {busy ? 'Waiting for Google…' : g.accounts.length ? 'Add another account' : 'Connect Google account'}
+            </button>
+          ) : (
+            <p className="hint">
+              Gmail and Calendar need a one-time Google setup (free, about five minutes). It gives you a
+              “client ID” to paste below; it stays on this device.
+            </p>
+          )}
+          <div className="field">
+            <input
+              value={id} placeholder="Paste client ID" aria-label="Google client ID"
+              autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => setId(e.target.value)}
+            />
+            <button className="btn soft" disabled={id.trim() === g.clientId} onClick={() => (setClientId(id), ui.toast('Client ID saved'))}>Save</button>
+          </div>
+          {err && <p className="err">{err}</p>}
+          </>
         )}
-        <div className="field">
-          <input
-            value={id} placeholder="Paste client ID" aria-label="Google client ID"
-            autoCapitalize="off" autoCorrect="off" spellCheck={false} onChange={(e) => setId(e.target.value)}
-          />
-          <button className="btn soft" disabled={id.trim() === g.clientId} onClick={() => (setClientId(id), ui.toast('Client ID saved'))}>Save</button>
-        </div>
-        {err && <p className="err">{err}</p>}
 
         {g.accounts.length > 0 && !cloud.available && (
           <>

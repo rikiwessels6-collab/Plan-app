@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react'
-import { CATALOG, GROUPS, typeOf } from './catalog'
+import { available, CATALOG, GROUPS, typeOf } from './catalog'
 import { chime, notify, saveFile, setBadge, shareCard } from './device'
 import { detect, fetchAll, invite, join, members, redeem, syncSoon, useCloud, useCloudSync } from './cloud'
 import { connect, reconnect, useGoogle } from './google'
@@ -17,7 +17,7 @@ const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches
 
 function Picker({ onClose, onAdd }: { onClose: () => void; onAdd: (type: string) => void }) {
   const [q, setQ] = useState('')
-  const hits = CATALOG.filter((t) => t.name.toLowerCase().includes(q.trim().toLowerCase()))
+  const hits = available().filter((t) => t.name.toLowerCase().includes(q.trim().toLowerCase()))
   return (
     <Sheet title="New card" onClose={onClose} tall>
       {(close) => (
@@ -31,7 +31,7 @@ function Picker({ onClose, onAdd }: { onClose: () => void; onAdd: (type: string)
           >
             <Icon name="Search" />
             <input
-              autoFocus={matchMedia('(pointer: fine)').matches} value={q} placeholder={`Search ${CATALOG.length} cards`}
+              autoFocus={matchMedia('(pointer: fine)').matches} value={q} placeholder={`Search ${available().length} cards`}
               aria-label="Search cards" enterKeyHint="go" onChange={(e) => setQ(e.target.value)}
             />
           </form>
@@ -726,7 +726,7 @@ function Board({ state, dispatch, canUndo, canRedo }: { state: State; dispatch: 
         <div className="empty">
           <span><Icon name="Plus" size={22} /></span>
           <h2>{space ? `Nothing in ${space.name} yet` : 'A fresh board'}</h2>
-          <p>Add a card to get started. There are {CATALOG.length} to choose from.</p>
+          <p>Add a card to get started. There are {available().length} to choose from.</p>
           <button className="btn" onClick={() => setOverlay('picker')}>Add a card</button>
         </div>
       )}

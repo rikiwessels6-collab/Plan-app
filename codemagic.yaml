@@ -1,0 +1,47 @@
+# Builds the Plainsight iPhone and iPad app on Codemagic's Macs and uploads it to App Store Connect
+# (TestFlight first; you then submit it for review from App Store Connect).
+# Setup steps are in docs/APP_STORE.md.
+workflows:
+  ios-release:
+    name: Plainsight for iPhone and iPad
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    integrations:
+      # the App Store Connect API key you add in Codemagic (Team settings, Integrations); use this exact name
+      app_store_connect: Plainsight
+    environment:
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: app.plainsight.ios
+      vars:
+        # The live website. The app sends sync and sharing to it, and invitation links point to it.
+        VITE_PUBLIC_URL: ""
+      node: 22
+      xcode: latest
+    scripts:
+      - name: Check settings
+        script: |
+          if [ -z "$VITE_PUBLIC_URL" ]; then
+            echo "VITE_PUBLIC_URL is empty: put the address of your live Plainsight site in codemagic.yaml"; exit 1
+          fi
+      - name: Install
+        script: npm ci
+      - name: Build the app
+        script: npm run build
+      - name: Copy it into the iOS project
+        script: npx cap sync ios
+      - name: Set signing
+        script: xcode-project use-profiles
+      - name: Number this build
+        script: |
+          cd ios/App
+          agvtool new-version -all $(($BUILD_NUMBER + 1))
+      - name: Build for the App Store
+        script: xcode-project build-ipa --project "ios/App/App.xcodeproj" --scheme "App"
+    artifacts:
+      - build/ios/ipa/*.ipa
+      - /tmp/xcodebuild_logs/*.log
+    publishing:
+      app_store_connect:
+        auth: integration
+        submit_to_testflight: true
